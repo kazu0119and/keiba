@@ -1,0 +1,2203 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>レトロ競馬シミュレーター</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            user-select: none;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* 疾走感を出す背景スクロールアニメーション */
+        @keyframes scrollBg {
+            0% { background-position: 0 0; }
+            100% { background-position: -100px 0; }
+        }
+        .bg-scroll {
+            background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px);
+            animation: scrollBg 0.4s linear infinite;
+        }
+        
+        /* 砂埃のアニメーション */
+        @keyframes dustFly {
+            0% { transform: translate(0, 0) scale(0.8); opacity: 0.8; }
+            100% { transform: translate(-20px, -5px) scale(1.5); opacity: 0; }
+        }
+        .dust-anim {
+            animation: dustFly 0.3s linear infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-950 text-amber-500 p-2 md:p-4">
+    <div id="app" class="max-w-6xl mx-auto border-4 border-amber-600 rounded-sm p-1 bg-black shadow-[0_0_15px_rgba(217,119,6,0.5)]">
+        
+        <!-- ヘッダー情報 -->
+        <div id="main-header" class="border-b-2 border-amber-800 pb-2 mb-2 flex justify-between items-center px-4 pt-2 bg-gradient-to-b from-gray-900 to-black relative">
+            <div class="absolute top-1 right-2 text-[10px] text-gray-500 flex items-center gap-1 md:gap-2">
+                <span id="login-status" class="mr-2 hidden md:inline"></span>
+                <button onclick="goToTitle()" class="bg-gray-800 hover:bg-gray-700 text-amber-500 px-1.5 md:px-2 py-0.5 rounded border border-gray-600 transition-colors">🏠 タイトル</button>
+                <button onclick="showHelpModal()" class="bg-gray-800 hover:bg-gray-700 text-amber-500 px-1.5 md:px-2 py-0.5 rounded border border-gray-600 transition-colors">📖 遊び方</button>
+                <button id="btn-save" onclick="showSaveModal()" class="bg-gray-800 hover:bg-gray-700 text-amber-500 px-1.5 md:px-2 py-0.5 rounded border border-gray-600 transition-colors">💾 セーブ</button>
+                <button id="btn-load" onclick="showLoadModal()" class="bg-gray-800 hover:bg-gray-700 text-amber-500 px-1.5 md:px-2 py-0.5 rounded border border-gray-600 transition-colors">📂 ロード</button>
+                <div id="header-mode-indicator" class="hidden md:flex items-center ml-1">
+                    <span class="w-2 h-2 rounded-full bg-blue-500 mr-1 inline-block"></span>LOCAL PLAY
+                </div>
+            </div>
+
+            <div>
+                <h1 class="text-xl md:text-2xl font-bold text-yellow-400 tracking-widest drop-shadow-[0_0_5px_rgba(250,204,21,0.8)]">
+                    🐎 RETRO STAR HORSE
+                </h1>
+                <p id="header-race-count" class="text-xs text-amber-600 font-bold mt-1">RACE 1</p>
+            </div>
+            <div class="text-right mt-2">
+                <p class="text-[10px] text-amber-600">CREDIT</p>
+                <p class="text-2xl text-yellow-400 font-bold drop-shadow-[0_0_5px_rgba(250,204,21,0.8)]">
+                    <span id="header-money">10,000</span> <span class="text-sm">円</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- 実況メッセージボード -->
+        <div id="message-board" class="bg-gray-900 border-2 border-amber-600 p-2 mb-4 rounded-sm text-yellow-300 text-center font-bold tracking-wide shadow-[inset_0_0_10px_rgba(0,0,0,0.8)]">
+            本日はご来場ありがとうございます。BET受付を開始します。
+        </div>
+
+        <!-- メインコンテンツ領域 -->
+        <div id="main-content"></div>
+
+    </div>
+
+    <!-- モーダル（ポップアップ）用オーバーレイ -->
+    <div id="modal-overlay" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div id="modal-content" class="bg-gray-900 border-2 border-amber-600 p-6 rounded shadow-[0_0_20px_rgba(217,119,6,0.5)] max-w-lg w-full font-mono">
+            <!-- JSで動的に書き換え -->
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // === Firebase Init ===
+        const firebaseConfig = {
+            apiKey: "AIzaSyAgEIFdC_C1aqk-4_x3OjSDd94-7FEKBHE",
+            authDomain: "keiba-7fcf0.firebaseapp.com",
+            projectId: "keiba-7fcf0",
+            storageBucket: "keiba-7fcf0.firebasestorage.app",
+            messagingSenderId: "114388442030",
+            appId: "1:114388442030:web:9baebd247da42db573c63f",
+            measurementId: "G-HZN3MBYB12"
+        };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "retro-derby-my-app";
+        const provider = new GoogleAuthProvider();
+
+        let currentUser = null;
+        let currentRoomId = null;
+        let isHost = false;
+        let unsubscribeRoom = null;
+        let roomData = null;
+        let tempPlayerName = "";
+
+        // ★同一ブラウザの複数タブでも別人と認識させるためのセッションID
+        const localSessionId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+
+        let isInitialAuthCheck = true;
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (isInitialAuthCheck && user && !user.isAnonymous) {
+                state.loginSelected = true; // すでにGoogleログイン済みなら選択画面スキップ
+            }
+            isInitialAuthCheck = false;
+            
+            window.updateHeader();
+            if (state.phase === 'title') {
+                window.render();
+            }
+        });
+
+        const initAuth = async () => {
+            if (!auth.currentUser) {
+                await signInAnonymously(auth);
+            }
+        };
+        initAuth();
+
+        window.loginWithGoogleTitle = async () => {
+            try {
+                const result = await signInWithPopup(auth, provider);
+                if (result.user) {
+                    state.loginSelected = true;
+                    window.render();
+                }
+            } catch (e) {
+                console.error("Login failed", e);
+                alert("ログインに失敗しました。\n\n【重要】HTMLファイルを直接開いている場合、Googleログインは動作しません。Vercel等で公開したURL（https://...）からアクセスしてください。\n\nエラー: " + e.message);
+            }
+        };
+
+        window.selectGuest = () => {
+            state.loginSelected = true;
+            window.render();
+        };
+
+        window.loginWithGoogle = () => {
+            signInWithPopup(auth, provider).catch(e => {
+                console.error("Login failed", e);
+                alert("ログインに失敗しました。\n※HTMLファイルを直接開いている場合、Googleログインは動作しません。Vercel等で公開したURLからアクセスしてください。");
+            });
+        };
+        
+        window.logoutGoogle = async () => {
+            try {
+                await signOut(auth);
+                state.loginSelected = false; // ログアウトしたらログイン選択画面に戻す
+                window.executeGoToTitle();
+            } catch(e) {
+                console.error("Logout failed", e);
+            }
+        };
+
+        // --- 定数データ ---
+        const HORSE_NAMES = ["ハルウララ", "ディープ", "オグリ", "マックイーン", "テイオー", "ルドルフ", "ゴルシ", "ブルボン", "ライス", "タマモ", "スズカ", "ウオッカ", "ダスカ"];
+        const CONDITIONS = [
+            { label: "絶好調", mod: 1.1, icon: "🔥", color: "text-red-500" },
+            { label: "好調", mod: 1.05, icon: "✨", color: "text-orange-400" },
+            { label: "普通", mod: 1.0, icon: "・", color: "text-white" },
+            { label: "不調", mod: 0.9, icon: "💧", color: "text-blue-400" },
+        ];
+        const TYPES = ["逃げ", "先行", "差し", "追込"];
+        const BET_TYPES = ["単勝", "複勝", "枠連", "馬連", "馬単", "ワイド", "3連複", "3連単"];
+        const WAKU_COLORS = [
+            { bg: 'bg-white', text: 'text-black', border: 'border-gray-400' },
+            { bg: 'bg-gray-800', text: 'text-white', border: 'border-gray-900' },
+            { bg: 'bg-red-600', text: 'text-white', border: 'border-red-800' },
+            { bg: 'bg-blue-600', text: 'text-white', border: 'border-blue-800' },
+            { bg: 'bg-yellow-400', text: 'text-black', border: 'border-yellow-600' },
+            { bg: 'bg-green-600', text: 'text-white', border: 'border-green-800' },
+            { bg: 'bg-orange-500', text: 'text-white', border: 'border-orange-700' },
+            { bg: 'bg-pink-400', text: 'text-black', border: 'border-pink-600' }
+        ];
+
+        // --- アップグレードデータ ---
+        const MULTI_BONUS_UPGRADES = [
+            { level: 1, rate: 1.0, cost: 0 },
+            { level: 2, rate: 1.1, cost: 100000 },
+            { level: 3, rate: 1.2, cost: 500000 },
+            { level: 4, rate: 1.3, cost: 1000000 },
+            { level: 5, rate: 1.5, cost: 5000000 },
+            { level: 6, rate: 2.0, cost: 10000000 }
+        ];
+
+        // --- ユーティリティ ---
+        const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+        
+        const getInitialHorse = () => {
+            const prefix = ["スーパー", "ミラクル", "シャイニング", "ダーク", "クレイジー", "ワンダー"];
+            const nameBase = HORSE_NAMES[randomInt(0, HORSE_NAMES.length - 1)];
+            const name = Math.random() > 0.5 ? `${prefix[randomInt(0, prefix.length - 1)]}${nameBase}` : `${nameBase}ボーイ`;
+            return {
+                id: Date.now() + randomInt(0, 1000),
+                name: name,
+                type: TYPES[randomInt(0, TYPES.length - 1)],
+                speed: 75,   
+                stamina: 70, 
+                guts: 65,    
+                lastRaceResult: '新馬'
+            };
+        };
+
+        const generateHorses = (isSinglePlayer = true, customHorsesPool = []) => {
+            let horses = [];
+            let totalPower = 0;
+            const prefix = ["スーパー", "ミラクル", "シャイニング", "ダーク", "クレイジー", "ワンダー"];
+            const JOCKEYS = [
+                { name: "武", rank: "S", skill: 1.05 },
+                { name: "ルメ", rank: "S", skill: 1.05 },
+                { name: "川田", rank: "S", skill: 1.05 },
+                { name: "横山", rank: "A", skill: 1.02 },
+                { name: "戸崎", rank: "A", skill: 1.02 },
+                { name: "松山", rank: "A", skill: 1.02 },
+                { name: "デム", rank: "B", skill: 0.98 },
+                { name: "岩田", rank: "B", skill: 0.98 },
+                { name: "池添", rank: "B", skill: 0.98 },
+                { name: "坂井", rank: "C", skill: 0.95 },
+                { name: "新人", rank: "C", skill: 0.90 }
+            ];
+
+            let participatingMyHorses = [];
+            let poolToUse = isSinglePlayer ? (state.myHorses || []) : customHorsesPool;
+
+            if (poolToUse && poolToUse.length > 0) {
+                const shuffledMyHorses = [...poolToUse].sort(() => Math.random() - 0.5);
+                let count = 0;
+                shuffledMyHorses.forEach(myHorse => {
+                    // ★確率UP: 90%の確率で出現 (最大3頭まで)
+                    if (Math.random() < 0.90 && participatingMyHorses.length < 8 && count < 3) {
+                        participatingMyHorses.push(myHorse);
+                        count++;
+                    }
+                });
+            }
+
+            const numToGenerate = 8 - participatingMyHorses.length;
+
+            for (let i = 1; i <= numToGenerate; i++) {
+                const baseSpeed = randomInt(70, 95);
+                const stamina = randomInt(60, 95);
+                const guts = randomInt(50, 90);
+                const condition = CONDITIONS[randomInt(0, CONDITIONS.length - 1)];
+                const type = TYPES[randomInt(0, TYPES.length - 1)];
+                const jockey = JOCKEYS[randomInt(0, JOCKEYS.length - 1)];
+                
+                const power = (baseSpeed + stamina + guts) * condition.mod * jockey.skill;
+
+                const nameBase = HORSE_NAMES[randomInt(0, HORSE_NAMES.length - 1)];
+                const name = Math.random() > 0.5 ? `${prefix[randomInt(0, prefix.length - 1)]}${nameBase}` : `${nameBase}ボーイ`;
+
+                const weight = randomInt(430, 540);
+                const weightDiff = randomInt(-10, 10);
+                const weightStr = `${weight}(${weightDiff > 0 ? '+'+weightDiff : weightDiff === 0 ? '±0' : weightDiff})`;
+                
+                let lastRace = randomInt(1, 9);
+                if (power > 290) lastRace = randomInt(1, 2);
+                else if (power > 250) lastRace = randomInt(1, 4);
+                else if (power < 200) lastRace = randomInt(5, 9);
+
+                horses.push({
+                    id: i, no: i, name: name,
+                    speed: baseSpeed, stamina: stamina, guts: guts,
+                    type: type, condition: condition, power: power,
+                    isDelayed: Math.random() < 0.15,
+                    randomFactor: Math.random(),
+                    jockey: jockey,
+                    weightStr: weightStr,
+                    lastRace: `${lastRace}着`,
+                    isAccident: Math.random() < 0.001,
+                    accidentTick: randomInt(150, 450),
+                    isRetired: false,
+                    isMyHorse: false
+                });
+            }
+
+            participatingMyHorses.forEach((myHorse, idx) => {
+                const condition = CONDITIONS[randomInt(0, CONDITIONS.length - 1)];
+                const jockey = JOCKEYS[randomInt(0, JOCKEYS.length - 1)];
+                const power = (myHorse.speed + myHorse.stamina + myHorse.guts) * condition.mod * jockey.skill;
+                const weight = randomInt(450, 520);
+                const weightDiff = randomInt(-10, 10);
+                const weightStr = `${weight}(${weightDiff > 0 ? '+'+weightDiff : weightDiff === 0 ? '±0' : weightDiff})`;
+                
+                horses.push({
+                    id: 100 + idx, no: 0, name: myHorse.name,
+                    speed: myHorse.speed, stamina: myHorse.stamina, guts: myHorse.guts,
+                    type: myHorse.type, condition: condition, power: power,
+                    isDelayed: Math.random() < 0.10, 
+                    randomFactor: Math.random(),
+                    jockey: jockey,
+                    weightStr: weightStr,
+                    lastRace: myHorse.lastRaceResult,
+                    isAccident: false, 
+                    accidentTick: 0,
+                    isRetired: false,
+                    isMyHorse: true,
+                    originalRef: myHorse,
+                    ownerSessionId: isSinglePlayer ? localSessionId : myHorse.ownerSessionId,
+                    ownerName: isSinglePlayer ? 'あなた' : myHorse.ownerName
+                });
+            });
+
+            horses.forEach(h => totalPower += h.power);
+
+            horses = horses.map(h => {
+                const winOdds = Math.max(1.1, ((totalPower / h.power) * 0.8) + (Math.random() * 2 - 1));
+                return { ...h, odds: parseFloat(winOdds.toFixed(1)) };
+            }).sort((a, b) => a.odds - b.odds);
+
+            const marks = ["◎", "〇", "▲", "△", "△", "・", "・", "・"];
+            horses.forEach((h, index) => { h.mark = marks[index]; });
+
+            horses.sort(() => Math.random() - 0.5);
+            horses.forEach((h, index) => {
+                h.no = index + 1;
+            });
+
+            return horses.sort((a, b) => a.no - b.no).map((h, i) => ({ ...h, waku: WAKU_COLORS[i] }));
+        };
+
+        // --- グローバル状態 ---
+        const state = {
+            loginSelected: false, // ★ログイン選択状態
+            mode: 'single', 
+            hardcoreId: null, 
+            phase: 'title',
+            horses: [],
+            raceCount: 1,
+            money: 10000,
+            multiBonusLevel: 1, 
+            bets: [],
+            message: "本日はご来場ありがとうございます。BET受付を開始します。",
+            selectedBetType: '単勝',
+            selectedHorses: [],
+            betAmount: 100, 
+            animationRef: null,
+            horsesRef: [],
+            raceResult: [],
+            lastProg: 0, 
+            myHorseTempType: '逃げ',
+            myHorses: [],
+            trainingHorse: null,
+            training: { turn: 10, hp: 100, maxHp: 100 },
+            isDead: false 
+        };
+
+        // --- 所持金の同期機能 ---
+        window.syncMoney = (newMoney) => {
+            state.money = newMoney;
+            window.updateHeader();
+            if (state.mode === 'multi' && currentRoomId) {
+                updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                    [`players.${localSessionId}.money`]: newMoney
+                }).catch(e => console.error("Money sync error:", e));
+            }
+        };
+
+        // --- BET金額の更新 ---
+        window.updateBetAmount = (val) => {
+            if (val === "") {
+                state.betAmount = "";
+                return;
+            }
+            const amt = parseInt(val, 10);
+            if(!isNaN(amt)) {
+                state.betAmount = amt;
+            }
+        };
+
+        // --- UI更新関数 ---
+        window.updateHeader = function() {
+            document.getElementById('header-race-count').innerText = `RACE ${state.raceCount}`;
+            document.getElementById('header-money').innerText = state.money.toLocaleString();
+
+            const indicator = document.getElementById('header-mode-indicator');
+            const btnSave = document.getElementById('btn-save');
+            const btnLoad = document.getElementById('btn-load');
+            const loginStatus = document.getElementById('login-status');
+
+            if (loginStatus) {
+                if (currentUser && !currentUser.isAnonymous) {
+                    loginStatus.innerHTML = `<span class="text-green-400">👤 ${currentUser.displayName || 'Player'}</span> <button onclick="logoutGoogle()" class="underline ml-1 text-gray-400 hover:text-white">ログアウト</button>`;
+                } else {
+                    loginStatus.innerHTML = `<button onclick="loginWithGoogle()" class="text-blue-400 hover:text-blue-300 underline">Googleログイン</button>`;
+                }
+            }
+
+            if (state.mode === 'multi') {
+                indicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-500 mr-1 inline-block animate-pulse"></span>ONLINE: ${currentRoomId || ''}`;
+                btnSave.style.display = 'none';
+                btnLoad.style.display = 'none';
+            } else if (state.mode === 'hardcore') {
+                indicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-600 mr-1 inline-block animate-pulse"></span>HARDCORE`;
+                btnSave.style.display = 'block'; 
+                btnLoad.style.display = 'block'; 
+            } else {
+                indicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 mr-1 inline-block"></span>LOCAL PLAY`;
+                btnSave.style.display = 'block';
+                btnLoad.style.display = 'block';
+            }
+        };
+
+        window.setMessage = function(msg) {
+            state.message = msg;
+            const mb = document.getElementById('message-board');
+            if(mb) mb.innerText = msg;
+        };
+
+        // --- セーブ＆ロード ---
+        window.generateSaveData = function() {
+            const saveData = {
+                md: state.mode,
+                hid: state.hardcoreId, 
+                m: state.money,
+                r: state.raceCount,
+                b: state.multiBonusLevel || 1, 
+                h: state.myHorses.map(h => ({
+                    n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult
+                }))
+            };
+            const jsonStr = JSON.stringify(saveData);
+            return btoa(unescape(encodeURIComponent(jsonStr)));
+        };
+
+        window.loadSaveData = function(base64) {
+            try {
+                const jsonStr = decodeURIComponent(escape(atob(base64)));
+                const data = JSON.parse(jsonStr);
+                if (data.m === undefined || data.r === undefined || !Array.isArray(data.h)) return false;
+                
+                if (data.md === 'hardcore' && data.hid) {
+                    const deadIdsStr = localStorage.getItem('dead_hardcore_ids') || '[]';
+                    const deadIds = JSON.parse(deadIdsStr);
+                    if (deadIds.includes(data.hid)) {
+                        return 'dead'; 
+                    }
+                }
+
+                state.mode = data.md || 'single';
+                state.hardcoreId = data.hid || null;
+                state.money = data.m;
+                state.raceCount = data.r;
+                state.multiBonusLevel = data.b || 1; 
+                state.myHorses = data.h.map((h, i) => ({
+                    name: h.n, type: h.t, speed: h.s, stamina: h.st, guts: h.g, lastRaceResult: h.l,
+                    id: 1000 + i
+                }));
+                return true;
+            } catch(e) {
+                return false;
+            }
+        };
+
+        window.openModal = function(html) {
+            document.getElementById('modal-content').innerHTML = html;
+            document.getElementById('modal-overlay').classList.remove('hidden');
+        };
+
+        window.closeModal = function() {
+            document.getElementById('modal-overlay').classList.add('hidden');
+        };
+
+        window.showSettingsModal = () => {
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-6 text-center">⚙️ 設定</h3>
+                <div class="flex flex-col gap-4 mb-6 px-4">
+                    <a href="mailto:j7fuji.ka@gmail.com?subject=【レトロ競馬】問い合わせ" class="block text-center bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold py-4 rounded border border-blue-500 transition-colors shadow-md">
+                        📧 開発者へ問い合わせる
+                    </a>
+                </div>
+                <div class="text-center">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
+                </div>
+            `);
+        };
+
+        window.showHelpModal = () => {
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">📖 遊び方</h3>
+                <div class="text-xs md:text-sm text-gray-300 mb-4 h-64 overflow-y-auto space-y-3 border border-amber-900 p-3 bg-black rounded shadow-inner hide-scrollbar">
+                    <p><strong class="text-white">【基本ルール】</strong><br>所持金を使って馬券を買い、レースで資金を増やしましょう。所持金が0になり、売却できる馬もいないとゲームオーバーになります。</p>
+                    <p><strong class="text-white">【ハードコアモード】</strong><br>ひとりで遊ぶの高難易度モードです。馬券が的中すれば配当は常に1万倍ですが、一度でもハズレると全財産と愛馬が没収されます。</p>
+                    <p><strong class="text-white">【マイホースの育成】</strong><br>資金が貯まると、自分だけの馬を購入し育成できます。調教メニューを選んでステータスを上げましょう。</p>
+                    <p><strong class="text-white">【マイホースの出走】</strong><br>育成したマイホースは、高確率（90%）で通常のレースに乱入出走します。出走して3着以内に入ると賞金がもらえます。</p>
+                    <p><strong class="text-white">【みんなで遊ぶ (マルチプレイ)】</strong><br>友達と部屋を作って対戦できます。ホストやゲストが育てた馬もオンラインのレースに参戦します！</p>
+                    <p><strong class="text-white">【ショップ】</strong><br>タイトル画面のショップで稼いだお金を払うと、マルチプレイ開始時の初期資金倍率をアップグレードできます。</p>
+                </div>
+                <div class="text-center">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
+                </div>
+            `);
+        };
+
+        window.showSinglePlayerMenu = () => {
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-6 text-center">🏇 ひとりで遊ぶ</h3>
+                <div class="flex flex-col gap-4 mb-6 px-4">
+                    <button onclick="startGame('single')" class="bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold py-4 rounded border border-blue-500 transition-colors shadow-md text-xl tracking-widest">
+                        ノーマルモード
+                    </button>
+                    <p class="text-[10px] text-gray-400 text-center -mt-3 mb-2">いつもの競馬シミュレーター。セーブ＆ロード可能。</p>
+                    
+                    <button onclick="showHardcoreConfirmModal()" class="bg-gradient-to-b from-red-800 to-red-950 hover:from-red-700 hover:to-red-900 text-red-200 font-bold py-4 rounded border border-red-700 transition-colors shadow-md text-xl tracking-widest relative overflow-hidden group">
+                        ☠️ ハードコアモード ☠️
+                    </button>
+                    <p class="text-[10px] text-red-400 text-center -mt-3">的中すると1万倍！ただし一度でもハズレると全財産と愛馬を没収。</p>
+                </div>
+                <div class="text-center">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">戻る</button>
+                </div>
+            `);
+        };
+
+        window.showHardcoreConfirmModal = () => {
+            window.openModal(`
+                <h3 class="text-xl text-red-500 font-bold mb-4 text-center">⚠️ 警告 ⚠️</h3>
+                <p class="text-sm text-gray-300 mb-4 text-center">
+                    ハードコアモードは非常に危険なゲームです。<br>
+                    馬券が的中すれば<span class="text-yellow-400 font-bold">配当が強制的に1万倍</span>になりますが、<br>
+                    <span class="text-red-400 font-bold">一度でも馬券を外すと、全財産と愛馬が没収されゼロからになります。</span><br>
+                </p>
+                <p class="text-sm text-white font-bold mb-6 text-center">本当に挑戦しますか？</p>
+                <div class="flex justify-between px-4">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded border border-gray-600 transition-colors">やめる</button>
+                    <button onclick="startGame('hardcore')" class="bg-red-800 hover:bg-red-700 text-white font-bold px-6 py-2 rounded border border-red-500 transition-colors shadow-[0_0_15px_rgba(220,38,38,0.8)]">挑戦する</button>
+                </div>
+            `);
+        };
+
+        window.showShopModal = () => {
+            const currentLevel = state.multiBonusLevel || 1;
+            const nextUpgrade = MULTI_BONUS_UPGRADES.find(u => u.level === currentLevel + 1);
+            
+            let shopContent = "";
+            if (nextUpgrade) {
+                shopContent = `
+                    <p class="text-sm text-gray-300 mb-4 text-center">ソロプレイで稼いだお金を使って、<br>マルチプレイの初期資金倍率を永続アップグレード！</p>
+                    <div class="bg-black border border-yellow-700 p-4 rounded mb-4 text-center">
+                        <p class="text-xs text-amber-500 mb-2">現在の初期資金倍率</p>
+                        <p class="text-2xl text-yellow-400 font-bold">x${MULTI_BONUS_UPGRADES[currentLevel-1].rate.toFixed(1)}</p>
+                    </div>
+                    <div class="flex justify-between items-center bg-gray-800 p-4 rounded border border-gray-700">
+                        <div>
+                            <p class="text-white font-bold mb-1">次のレベル: x${nextUpgrade.rate.toFixed(1)}</p>
+                            <p class="text-xs text-amber-400 font-bold">費用: ${nextUpgrade.cost.toLocaleString()} 円</p>
+                        </div>
+                        <button onclick="buyMultiBonus()" class="bg-gradient-to-b from-yellow-500 to-yellow-700 hover:from-yellow-400 hover:to-yellow-600 text-black font-bold py-2 px-4 rounded shadow-[0_0_10px_rgba(234,179,8,0.5)] active:transform active:scale-[0.98]">
+                            購入する
+                        </button>
+                    </div>
+                    <p id="shop-error" class="text-red-500 text-xs hidden text-center font-bold mt-3"></p>
+                `;
+            } else {
+                shopContent = `
+                    <div class="bg-black border border-yellow-700 p-6 rounded mb-4 text-center shadow-[inset_0_0_20px_rgba(234,179,8,0.2)]">
+                        <p class="text-xs text-amber-500 mb-2">現在の初期資金倍率</p>
+                        <p class="text-4xl text-yellow-400 font-bold mb-4 drop-shadow-md">x${MULTI_BONUS_UPGRADES[currentLevel-1].rate.toFixed(1)}</p>
+                        <p class="text-sm text-green-400 font-bold animate-pulse">👑 MAX LEVEL 到達！ 👑</p>
+                    </div>
+                `;
+            }
+
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">🛒 ショップ</h3>
+                <div class="mb-4 text-right border-b border-amber-900/50 pb-2">
+                    <span class="text-[10px] text-amber-600 mr-2">手持ちの資金:</span>
+                    <span class="text-xl text-yellow-400 font-bold">${state.money.toLocaleString()} 円</span>
+                </div>
+                ${shopContent}
+                <div class="text-center mt-6">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
+                </div>
+            `);
+        };
+
+        window.buyMultiBonus = () => {
+            const currentLevel = state.multiBonusLevel || 1;
+            const nextUpgrade = MULTI_BONUS_UPGRADES.find(u => u.level === currentLevel + 1);
+            if (!nextUpgrade) return;
+
+            if (state.money < nextUpgrade.cost) {
+                const errEl = document.getElementById('shop-error');
+                if (errEl) {
+                    errEl.innerText = "所持金が足りません！レースで稼いできてください。";
+                    errEl.classList.remove('hidden');
+                }
+                return;
+            }
+
+            state.money -= nextUpgrade.cost;
+            state.multiBonusLevel = nextUpgrade.level;
+            
+            window.showShopModal(); 
+        };
+
+        window.showSaveModal = () => {
+            if(state.mode === 'multi') return;
+            const code = window.generateSaveData();
+            
+            let cloudSaveHtml = '';
+            if (currentUser && !currentUser.isAnonymous) {
+                cloudSaveHtml = `
+                    <div class="mt-4 border-t border-amber-900/50 pt-4">
+                        <p class="text-sm text-gray-300 mb-2">Googleアカウントにデータを保存しますか？</p>
+                        <button onclick="executeCloudSave()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded border border-blue-400 transition-colors shadow-md">☁️ クラウドにセーブ</button>
+                    </div>
+                `;
+            } else {
+                cloudSaveHtml = `
+                    <div class="mt-4 border-t border-amber-900/50 pt-4 text-center">
+                        <p class="text-xs text-gray-500 mb-2">Googleでログインするとクラウドセーブが使えます。</p>
+                        <button onclick="loginWithGoogle()" class="bg-gray-800 hover:bg-gray-700 text-blue-400 py-1 px-4 rounded border border-gray-600 transition-colors">Googleログイン</button>
+                    </div>
+                `;
+            }
+
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">💾 ふっかつのじゅもん</h3>
+                <p class="text-sm text-gray-300 mb-2">文字列を保存しておけば続きから遊べます。</p>
+                <textarea readonly class="w-full bg-black border border-amber-700 text-amber-500 p-2 rounded mb-2 h-20 font-mono text-xs focus:outline-none" onclick="this.select()">${code}</textarea>
+                ${cloudSaveHtml}
+                <div class="text-center mt-4">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
+                </div>
+            `);
+        };
+
+        window.showLoadModal = () => {
+            if(state.mode === 'multi') return;
+            
+            let cloudLoadHtml = '';
+            if (currentUser && !currentUser.isAnonymous) {
+                cloudLoadHtml = `
+                    <div class="mb-4 border-b border-amber-900/50 pb-4">
+                        <p class="text-sm text-gray-300 mb-2">Googleアカウントから復元しますか？</p>
+                        <button onclick="executeCloudLoad()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded border border-blue-400 transition-colors shadow-md">☁️ クラウドからロード</button>
+                    </div>
+                `;
+            }
+
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">📂 じゅもん / クラウド</h3>
+                ${cloudLoadHtml}
+                <p class="text-sm text-gray-300 mb-2">ふっかつのじゅもんを貼り付けてください。</p>
+                <textarea id="load-code-input" class="w-full bg-black border border-amber-700 text-amber-500 p-2 rounded mb-2 h-20 font-mono text-xs focus:outline-none focus:border-yellow-500"></textarea>
+                <p id="load-error" class="text-red-500 text-xs mb-4 hidden text-center font-bold animate-pulse"></p>
+                <div class="flex justify-between mt-2">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded border border-gray-600 transition-colors">やめる</button>
+                    <button onclick="executeLoad()" class="bg-amber-600 hover:bg-amber-500 text-black font-bold px-6 py-2 rounded border border-amber-400 transition-colors">となえる</button>
+                </div>
+            `);
+        };
+
+        window.executeCloudSave = async () => {
+            if (!currentUser || currentUser.isAnonymous) {
+                alert("Googleログインが必要です。");
+                return;
+            }
+            try {
+                const saveData = {
+                    md: state.mode,
+                    m: state.money,
+                    r: state.raceCount,
+                    b: state.multiBonusLevel || 1, 
+                    h: state.myHorses.map(h => ({
+                        n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult
+                    }))
+                };
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'retro_derby_saves', 'data');
+                await setDoc(docRef, { data: JSON.stringify(saveData), updatedAt: Date.now() });
+                
+                window.closeModal();
+                window.setMessage("☁️ クラウドにセーブしました！");
+                window.render();
+            } catch(e) {
+                console.error(e);
+                alert("クラウドセーブに失敗しました");
+            }
+        };
+
+        window.executeCloudLoad = async () => {
+            if (!currentUser || currentUser.isAnonymous) {
+                alert("Googleログインが必要です。");
+                return;
+            }
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'retro_derby_saves', 'data');
+                const snap = await getDoc(docRef);
+                if (snap.exists() && snap.data().data) {
+                    const dataStr = snap.data().data;
+                    const data = JSON.parse(dataStr);
+                    
+                    state.mode = data.md || 'single';
+                    state.money = data.m;
+                    state.raceCount = data.r;
+                    state.multiBonusLevel = data.b || 1; 
+                    state.myHorses = data.h.map((h, i) => ({
+                        name: h.n, type: h.t, speed: h.s, stamina: h.st, guts: h.g, lastRaceResult: h.l,
+                        id: 1000 + i
+                    }));
+                    
+                    window.closeModal();
+                    window.setMessage("☁️ クラウドからデータを復元しました！");
+                    if (state.animationRef) cancelAnimationFrame(state.animationRef);
+                    state.phase = 'betting';
+                    state.bets = [];
+                    state.horses = generateHorses(true);
+                    window.render();
+                } else {
+                    alert("クラウドに保存されたデータが見つかりません。");
+                }
+            } catch(e) {
+                console.error(e);
+                alert("クラウドからのロードに失敗しました");
+            }
+        };
+
+        window.executeLoad = async () => {
+            const code = document.getElementById('load-code-input').value.trim();
+            const loadResult = window.loadSaveData(code);
+            const errEl = document.getElementById('load-error');
+            
+            if (loadResult === 'dead') {
+                errEl.innerText = "このじゅもんは 呪われていて 使えません！";
+                errEl.classList.remove('hidden');
+                return;
+            } else if (!loadResult) {
+                errEl.innerText = "じゅもんが ちがいます！";
+                errEl.classList.remove('hidden');
+                return;
+            }
+
+            if (state.mode === 'hardcore' && state.hardcoreId) {
+                try {
+                    const deadDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_dead_ids', state.hardcoreId));
+                    if (deadDoc.exists()) {
+                        errEl.innerText = "このじゅもんは 呪われていて 使えません！";
+                        errEl.classList.remove('hidden');
+                        
+                        const deadIdsStr = localStorage.getItem('dead_hardcore_ids') || '[]';
+                        const deadIds = JSON.parse(deadIdsStr);
+                        if (!deadIds.includes(state.hardcoreId)) {
+                            deadIds.push(state.hardcoreId);
+                            localStorage.setItem('dead_hardcore_ids', JSON.stringify(deadIds));
+                        }
+                        return;
+                    }
+                } catch(e) {
+                    console.error("Firebase dead check failed", e);
+                }
+            }
+
+            window.closeModal();
+            window.setMessage("データが復元されました！引き続きレースをお楽しみください。");
+            if (state.animationRef) cancelAnimationFrame(state.animationRef);
+            state.phase = 'betting';
+            state.bets = [];
+            state.horses = generateHorses(true);
+            window.render();
+        };
+
+        window.goToTitle = () => {
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">🏠 タイトルへ戻る</h3>
+                <p class="text-sm text-gray-300 mb-6 text-center">タイトル画面に戻りますか？<br><span class="text-red-400 text-xs">（セーブしていない進行状況や通信状況は失われます）</span></p>
+                <div class="flex justify-between px-4">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded border border-gray-600 transition-colors">やめる</button>
+                    <button onclick="executeGoToTitle()" class="bg-red-600 hover:bg-red-500 text-white font-bold px-6 py-2 rounded border border-red-400 transition-colors">戻る</button>
+                </div>
+            `);
+        };
+
+        window.executeGoToTitle = async (isKicked = false) => {
+            window.closeModal();
+            if (state.animationRef) cancelAnimationFrame(state.animationRef);
+            if (unsubscribeRoom) {
+                unsubscribeRoom();
+                unsubscribeRoom = null;
+            }
+
+            if (!isKicked && state.mode === 'multi' && isHost && currentRoomId) {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId));
+                } catch(e) {
+                    console.error("部屋の削除に失敗しました", e);
+                }
+            }
+
+            state.mode = 'single';
+            state.isDead = false;
+            currentRoomId = null;
+            roomData = null;
+            state.phase = 'title';
+            window.render();
+        };
+
+        window.addEventListener('beforeunload', () => {
+            if (state.mode === 'multi' && isHost && currentRoomId) {
+                deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId)).catch(()=>{});
+            }
+        });
+
+        window.startGame = (mode = 'single') => {
+            window.closeModal();
+            state.mode = mode;
+            state.hardcoreId = mode === 'hardcore' ? `hc_${Date.now()}_${Math.random().toString(36).substr(2,9)}` : null;
+            state.raceCount = 1;
+            state.isDead = false;
+            window.syncMoney(10000);
+            
+            const initialHorse = getInitialHorse();
+            state.myHorses = [initialHorse];
+
+            state.bets = [];
+            state.selectedHorses = [];
+            state.myHorseTempType = '逃げ';
+            state.trainingHorse = null;
+            state.multiBonusLevel = 1; 
+            
+            state.horses = generateHorses(true);
+            state.phase = 'betting';
+
+            if (mode === 'hardcore') {
+                window.setMessage(`☠️ ハードコア開始。相棒「${initialHorse.name}」をプレゼント！ BET受付中。`);
+            } else {
+                window.setMessage(`最初の相棒「${initialHorse.name}」をプレゼント！ BET受付を開始します。`);
+            }
+            window.render();
+        };
+
+        // --- マルチプレイ機能 ---
+        window.updateTempPlayerName = (val) => {
+            tempPlayerName = val;
+        };
+
+        window.getMultiplayerInitialMoney = () => {
+            let base = 10000;
+            const currentLevel = state.multiBonusLevel || 1;
+            const bonusRate = MULTI_BONUS_UPGRADES[currentLevel - 1].rate;
+            return { money: Math.floor(base * bonusRate), rate: bonusRate };
+        };
+
+        window.showMultiplayerMenu = () => {
+            tempPlayerName = ""; 
+            const bonusInfo = window.getMultiplayerInitialMoney();
+            const bonusText = bonusInfo.rate > 1.0 
+                ? `<p class="text-[10px] text-green-400 font-bold mb-2">🎁 アップグレード適用中！ 初期資金が ${bonusInfo.rate.toFixed(1)}倍 (${bonusInfo.money.toLocaleString()}円) になります</p>` 
+                : `<p class="text-[10px] text-gray-500 mb-2">💡 タイトル画面のショップで初期資金倍率をアップグレードできます</p>`;
+
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-6 text-center">🌐 オンラインマルチプレイ</h3>
+                <div class="flex flex-col gap-4 mb-6 px-4">
+                    <div class="text-center">
+                        ${bonusText}
+                    </div>
+                    <input type="text" placeholder="あなたの名前 (10文字以内)" maxlength="10" oninput="updateTempPlayerName(this.value)" class="w-full bg-black border-2 border-amber-700 text-white p-3 rounded focus:outline-none focus:border-yellow-500">
+                    
+                    <button onclick="createRoom()" class="bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold py-3 rounded border border-blue-500 transition-colors shadow-md">
+                        部屋を作る (ホスト)
+                    </button>
+                    
+                    <div class="flex gap-2 items-center mt-4 border-t border-amber-800/50 pt-4">
+                        <input id="room-id-input" type="text" placeholder="ルームID(4桁)" maxlength="4" class="w-2/3 bg-black border-2 border-amber-700 text-white p-3 rounded focus:outline-none focus:border-yellow-500">
+                        <button onclick="joinRoom()" class="w-1/3 bg-green-700 hover:bg-green-600 text-white font-bold py-3 rounded border border-green-500 transition-colors shadow-md">
+                            入室
+                        </button>
+                    </div>
+                    <p id="multi-error" class="text-red-500 text-xs hidden text-center font-bold"></p>
+                </div>
+                <div class="text-center">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">戻る</button>
+                </div>
+            `);
+        };
+
+        function showMultiError(msg) {
+            const el = document.getElementById('multi-error');
+            if(el) {
+                el.innerText = msg;
+                el.classList.remove('hidden');
+            }
+        }
+
+        window.createRoom = async () => {
+            if(!currentUser) {
+                showMultiError("通信の準備中です...少し待ってから再度お試しください。");
+                return;
+            }
+            const nameToUse = tempPlayerName.trim() || "ホスト";
+            currentRoomId = Math.floor(1000 + Math.random() * 9000).toString();
+            isHost = true;
+            state.mode = 'multi';
+            
+            state.bets = [];
+            state.raceCount = 1;
+
+            if (state.myHorses.length === 0) {
+                state.myHorses.push(getInitialHorse());
+            }
+            
+            const customPool = state.myHorses.map(h => ({...h, ownerName: nameToUse, ownerSessionId: localSessionId}));
+            const newHorses = generateHorses(false, customPool); 
+            
+            const initialMoneyInfo = window.getMultiplayerInitialMoney();
+            const initialMoney = initialMoneyInfo.money;
+
+            const initialRoomData = {
+                hostUid: localSessionId, 
+                phase: 'lobby',
+                raceCount: 1,
+                horses: newHorses,
+                players: {
+                    [localSessionId]: { name: nameToUse, ready: false, money: initialMoney, myHorses: state.myHorses }
+                },
+                timestamp: Date.now()
+            };
+            
+            try {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), initialRoomData);
+                window.syncMoney(initialMoney);
+                window.closeModal();
+                listenRoom(currentRoomId);
+                state.phase = 'lobby'; 
+                window.render();
+            } catch (e) {
+                console.error(e);
+                showMultiError("部屋の作成に失敗しました。");
+            }
+        };
+
+        window.joinRoom = async () => {
+            if(!currentUser) {
+                showMultiError("通信の準備中です...少し待ってから再度お試しください。");
+                return;
+            }
+            const nameToUse = tempPlayerName.trim() || "ゲスト";
+            const roomId = document.getElementById('room-id-input').value.trim();
+            
+            if(!roomId || roomId.length !== 4) {
+                showMultiError("4桁のルームIDを入力してください。");
+                return;
+            }
+            
+            try {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', roomId);
+                const snapshot = await getDoc(roomRef);
+                if(!snapshot.exists()) {
+                    showMultiError("指定された部屋が見つかりません。");
+                    return;
+                }
+                
+                if (state.myHorses.length === 0) {
+                    state.myHorses.push(getInitialHorse());
+                }
+
+                const initialMoneyInfo = window.getMultiplayerInitialMoney();
+                const initialMoney = initialMoneyInfo.money;
+
+                await updateDoc(roomRef, {
+                    [`players.${localSessionId}`]: { name: nameToUse, ready: false, money: initialMoney, myHorses: state.myHorses }
+                });
+                
+                currentRoomId = roomId;
+                isHost = false;
+                state.mode = 'multi';
+                
+                state.bets = [];
+                window.syncMoney(initialMoney);
+                
+                window.closeModal();
+                listenRoom(roomId);
+                
+                const data = snapshot.data();
+                if (data.phase === 'betting') {
+                    state.phase = 'betting';
+                    state.raceCount = data.raceCount;
+                    state.horses = data.horses;
+                    window.render();
+                } else {
+                    state.phase = 'lobby'; 
+                    window.setMessage("レースが終了するのを待っています...");
+                    window.render();
+                }
+            } catch(e) {
+                console.error(e);
+                showMultiError("入室に失敗しました。");
+            }
+        };
+
+        function listenRoom(roomId) {
+            if(unsubscribeRoom) unsubscribeRoom();
+            
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', roomId);
+            unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
+                if (!snapshot.exists()) {
+                    alert("ホストが退出したため、部屋が解散されました。");
+                    window.executeGoToTitle(true); 
+                    return;
+                }
+                
+                const data = snapshot.data();
+                const oldPhase = roomData ? roomData.phase : null;
+                roomData = data;
+                
+                state.raceCount = data.raceCount;
+                state.horses = data.horses;
+                
+                if (data.phase === 'betting' && oldPhase !== 'betting') {
+                    state.phase = 'betting';
+                    state.bets = [];
+                    state.selectedHorses = [];
+                    if(state.animationRef) cancelAnimationFrame(state.animationRef);
+                    window.setMessage("BET受付を開始します。馬券を購入したら「READY(準備完了)」を押してください。");
+                    window.render();
+                }
+                else if (data.phase === 'running' && oldPhase !== 'running') {
+                    state.phase = 'running';
+                    window.setMessage("各馬ゲートイン完了... スタートしました！");
+                    window.render();
+                    setTimeout(() => {
+                        window.startRaceAnimation();
+                    }, 100);
+                }
+                
+                if (state.phase === 'lobby' || state.phase === 'betting') {
+                    window.render();
+                }
+            }, (error) => {
+                console.error(error);
+                window.setMessage("通信エラーが発生しました");
+            });
+        }
+
+        window.startMultiRace = async () => {
+            if (!currentRoomId) return;
+            const players = { ...roomData.players };
+            Object.keys(players).forEach(sid => players[sid].ready = false);
+            
+            let pool = [];
+            Object.keys(players).forEach(sid => {
+                const p = players[sid];
+                if(p.myHorses && p.myHorses.length > 0) {
+                    pool = pool.concat(p.myHorses.map(h => ({...h, ownerName: p.name, ownerSessionId: sid})));
+                }
+            });
+
+            const newHorses = generateHorses(false, pool);
+
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                phase: 'betting',
+                players: players,
+                horses: newHorses
+            });
+        };
+
+        window.toggleReady = async () => {
+            if (!currentRoomId) return;
+            const isReady = roomData.players[localSessionId].ready;
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                [`players.${localSessionId}.ready`]: !isReady
+            });
+        };
+
+        window.startMultiRun = async () => {
+            if(!isHost || !currentRoomId || !roomData) return;
+            
+            const allReady = Object.values(roomData.players).every(p => p.ready);
+            if (!allReady) {
+                alert("全員が準備完了するまでスタートできません！");
+                return;
+            }
+
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                phase: 'running'
+            });
+        };
+
+        window.nextMultiRace = async () => {
+            if(!isHost || !currentRoomId || !roomData) return;
+            const nextCount = state.raceCount + 1;
+            
+            const updatedPlayers = { ...roomData.players };
+            Object.keys(updatedPlayers).forEach(k => updatedPlayers[k].ready = false);
+            
+            let pool = [];
+            Object.keys(updatedPlayers).forEach(sid => {
+                const p = updatedPlayers[sid];
+                if(p.myHorses && p.myHorses.length > 0) {
+                    pool = pool.concat(p.myHorses.map(h => ({...h, ownerName: p.name, ownerSessionId: sid})));
+                }
+            });
+            const newHorses = generateHorses(false, pool); 
+            
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                phase: 'betting',
+                raceCount: nextCount,
+                horses: newHorses,
+                players: updatedPlayers
+            });
+        };
+
+        window.render = function() {
+            const header = document.getElementById('main-header');
+            const messageBoard = document.getElementById('message-board');
+            
+            if (state.phase === 'title') {
+                if (header) header.style.display = 'none';
+                if (messageBoard) messageBoard.style.display = 'none';
+            } else {
+                if (header) header.style.display = 'flex';
+                if (messageBoard) messageBoard.style.display = 'block';
+                window.updateHeader();
+            }
+
+            const mainContent = document.getElementById('main-content');
+
+            if (state.phase === 'title') {
+                mainContent.innerHTML = getTitleHTML();
+            } else if (state.phase === 'lobby') {
+                mainContent.innerHTML = getLobbyHTML();
+            } else if (state.phase === 'create') {
+                mainContent.innerHTML = getCreateHorseHTML();
+            } else if (state.phase === 'training') {
+                mainContent.innerHTML = getTrainingHTML();
+            } else if (state.phase === 'betting') {
+                mainContent.innerHTML = getBettingHTML();
+            } else if (state.phase === 'running') {
+                if (!document.getElementById('race-container')) {
+                    mainContent.innerHTML = getRaceHTML();
+                    window.startRaceAnimation(); 
+                }
+            } else if (state.phase === 'result') {
+                mainContent.innerHTML = getResultHTML();
+            }
+        };
+
+        // --- ゲームアクション ---
+        window.nextRace = () => {
+            if ((state.mode === 'single' || state.mode === 'hardcore') && state.money <= 0 && state.myHorses.length === 0) {
+                window.setMessage("破産しました... GAME OVER。ブラウザをリロードして再挑戦してください。");
+                return;
+            }
+            state.bets = [];
+            state.raceCount++;
+            state.horses = generateHorses(true);
+            state.phase = 'betting';
+            
+            const myHorsesInRace = state.horses.filter(h => h.isMyHorse && h.ownerSessionId === localSessionId).map(h => h.name);
+            if (state.money <= 0 && state.myHorses.length > 0) {
+                window.setMessage(`破産寸前です...。しかし愛馬を売却すれば資金を作れるかもしれません。`);
+            } else if (myHorsesInRace.length > 0) {
+                window.setMessage(`第${state.raceCount}レース、BET受付を開始します。愛馬（${myHorsesInRace.join(', ')}）が出走します！`);
+            } else {
+                window.setMessage(`第${state.raceCount}レース、BET受付を開始します。`);
+            }
+            window.render();
+        };
+
+        window.buyHorse = () => {
+            const cost = 50000 * (state.myHorses.length + 1);
+            if (state.money < cost) {
+                window.setMessage(`馬の購入には ${cost.toLocaleString()} 円必要です。レースで資金を増やしましょう！`);
+                return;
+            }
+            window.syncMoney(state.money - cost);
+            state.myHorseTempType = '逃げ';
+            state.phase = 'create';
+            window.setMessage(`馬を購入しました！あなただけの愛馬を作成してください。`);
+            window.render();
+        };
+
+        window.setMyHorseType = (type) => {
+            state.myHorseTempType = type;
+            window.render();
+        };
+
+        window.startTraining = () => {
+            const nameInput = document.getElementById('myhorse-name-input');
+            let name = nameInput.value.trim();
+            if(!name) name = `マイホース${state.myHorses.length + 1}世`;
+            state.trainingHorse = {
+                name: name,
+                type: state.myHorseTempType,
+                speed: 45, 
+                stamina: 45, 
+                guts: 45, 
+                lastRaceResult: '新馬'
+            };
+            state.training = { turn: 10, hp: 100, maxHp: 100 };
+            state.phase = 'training';
+            window.setMessage(`${name} の育成を開始します！残り10週でステータスを上げましょう。`);
+            window.render();
+        };
+
+        window.doTraining = (menu) => {
+            let msg = "";
+            let hpCost = 25;
+            let failureRate = Math.max(0, (40 - state.training.hp) / 40); 
+            
+            if (menu === 'rest') {
+                state.training.hp = Math.min(state.training.maxHp, state.training.hp + 60);
+                msg = `休養をとった。体力が回復した！`;
+                state.training.turn--;
+            } else {
+                if (Math.random() < failureRate) {
+                    msg = `【失敗】怪我をしてしまった！ステータスは上がらず、体力が減った...`;
+                    state.training.hp -= hpCost;
+                } else {
+                    state.training.hp -= hpCost;
+                    let up = randomInt(5, 11); 
+                    if (menu === 'speed') { 
+                        state.trainingHorse.speed = Math.min(100, state.trainingHorse.speed + up); 
+                        msg = `芝コースで調教！スピードが ${up} 上がった！`; 
+                    }
+                    if (menu === 'stamina') { 
+                        state.trainingHorse.stamina = Math.min(100, state.trainingHorse.stamina + up);
+                        msg = `ダートコースで調教！スタミナが ${up} 上がった！`; 
+                    }
+                    if (menu === 'guts') { 
+                        state.trainingHorse.guts = Math.min(100, state.trainingHorse.guts + up);
+                        msg = `坂路で調教！根性が ${up} 上がった！`; 
+                    }
+                }
+                state.training.turn--;
+            }
+
+            if (state.training.turn <= 0) {
+                if (!state.trainingHorse.id) state.trainingHorse.id = Date.now();
+                state.myHorses.push(state.trainingHorse);
+                const horseName = state.trainingHorse.name;
+                state.trainingHorse = null;
+                state.phase = 'betting';
+                state.horses = generateHorses(true);
+                window.setMessage(`育成完了！ ${horseName} が厩舎に入りました。次以降のレースでランダムに出走します！`);
+            } else {
+                window.setMessage(msg + ` (残り${state.training.turn}週)`);
+            }
+            window.render();
+        };
+
+        window.addBet = () => {
+            let requiredSelections = 1;
+            if (["馬連", "馬単", "枠連", "ワイド"].includes(state.selectedBetType)) requiredSelections = 2;
+            if (["3連複", "3連単"].includes(state.selectedBetType)) requiredSelections = 3;
+
+            if (state.selectedHorses.length !== requiredSelections) { window.setMessage(`馬を${requiredSelections}頭選択してください。`); return; }
+            
+            const betAmt = parseInt(state.betAmount, 10);
+            if (isNaN(betAmt) || betAmt <= 0) { window.setMessage("正しい金額を入力してください！"); return; }
+            if (state.money < betAmt) { window.setMessage("CREDITが足りません！"); return; }
+
+            window.syncMoney(state.money - betAmt);
+            state.bets.push({ type: state.selectedBetType, horses: [...state.selectedHorses], amount: betAmt });
+            state.selectedHorses = [];
+            window.setMessage("TICKETを追加しました。");
+            window.render();
+        };
+
+        window.removeBet = (index) => {
+            const bet = state.bets[index];
+            window.syncMoney(state.money + bet.amount);
+            state.bets.splice(index, 1);
+            window.render();
+        };
+
+        window.showSellModal = (id) => {
+            const horse = state.myHorses.find(h => h.id === id);
+            if (!horse) return;
+            const price = Math.floor((horse.speed + horse.stamina + horse.guts) * 150);
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">💸 馬の売却</h3>
+                <p class="text-sm text-gray-300 mb-4 text-center">「${horse.name}」を <span class="text-yellow-400 font-bold">${price.toLocaleString()} 円</span> で売却します。<br>本当によろしいですか？</p>
+                <div class="flex justify-between px-4 mt-6">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded border border-gray-600 transition-colors">やめる</button>
+                    <button onclick="executeSell(${id}, ${price})" class="bg-red-600 hover:bg-red-500 text-white font-bold px-6 py-2 rounded border border-red-400 transition-colors">売却する</button>
+                </div>
+            `);
+        };
+
+        window.executeSell = (id, price) => {
+            const horse = state.myHorses.find(h => h.id === id);
+            if (!horse) {
+                window.closeModal();
+                return;
+            }
+            state.myHorses = state.myHorses.filter(h => h.id !== id);
+            window.syncMoney(state.money + price);
+            
+            const raceHorse = state.horses.find(h => h.isMyHorse && h.originalRef && h.originalRef.id === id);
+            if (raceHorse) {
+                raceHorse.isMyHorse = false;
+            }
+
+            window.closeModal();
+            window.setMessage(`${horse.name} を ${price.toLocaleString()} 円で売却しました。`);
+            window.render();
+        };
+
+        window.startRace = () => {
+            state.phase = 'running';
+            window.setMessage("各馬ゲートイン完了... スタートしました！");
+            window.render();
+        };
+
+        window.setBetType = (type) => { state.selectedBetType = type; state.selectedHorses = []; window.render(); };
+        
+        window.handleHorseSelect = (horseNo) => {
+            let req = 1;
+            if (["馬連", "馬単", "枠連", "ワイド"].includes(state.selectedBetType)) req = 2;
+            if (["3連複", "3連単"].includes(state.selectedBetType)) req = 3;
+
+            if (state.selectedHorses.includes(horseNo)) {
+                state.selectedHorses = state.selectedHorses.filter(no => no !== horseNo);
+            } else {
+                if (state.selectedHorses.length < req) state.selectedHorses.push(horseNo);
+                else if (req > 1) { state.selectedHorses.shift(); state.selectedHorses.push(horseNo); }
+                else state.selectedHorses = [horseNo];
+            }
+            window.render();
+        };
+
+        // --- アニメーション ---
+        window.startRaceAnimation = function() {
+            state.horsesRef = state.horses.map(h => ({ ...h, x: 0, currentSpeed: 0, currentStamina: h.stamina, hasFinished: false }));
+            let tick = 0;
+            const raceLength = 1000;
+            state.lastProg = 0; 
+
+            const animate = () => {
+                tick++;
+                let allFinished = true;
+                let currentTopX = 0;
+                let accidentMsg = null;
+
+                state.horsesRef.forEach((h, index) => {
+                    if (h.isRetired) return; 
+
+                    if (h.hasFinished) {
+                        h.x += h.currentSpeed * 0.8;
+                        h.yOffset = Math.sin(tick * h.currentSpeed * 0.4) * 3; 
+                        
+                        const horseEl = document.getElementById(`horse-dom-${h.no}`);
+                        if (horseEl) {
+                            horseEl.style.left = `${(h.x / 1000) * 85}%`;
+                            horseEl.style.top = `calc(${index * 12 + 2}% + ${h.yOffset}px)`;
+                        }
+                        return;
+                    }
+                    
+                    allFinished = false; 
+
+                    if (h.isAccident && tick === h.accidentTick) {
+                        h.isRetired = true;
+                        h.currentSpeed = 0;
+                        h.finishTick = Infinity;
+                        accidentMsg = `🎙️ ああっ！！ ${h.no}番 ${h.name} にアクシデント発生！！ 競走を中止しました！！`;
+                        
+                        const horseEl = document.getElementById(`horse-dom-${h.no}`);
+                        if (horseEl) {
+                            document.getElementById(`horse-emoji-${h.no}`).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100"></span>💥`;
+                            document.getElementById(`horse-dust-${h.no}`).style.display = 'none';
+                        }
+                        return; 
+                    }
+
+                    const progressRatio = h.x / raceLength;
+                    let targetSpeed = h.speed / 40; 
+
+                    if (tick < 60) {
+                        if (h.isDelayed) targetSpeed *= 0.5;
+                        else if (h.type === '逃げ') targetSpeed *= 1.4;
+                    } else if (progressRatio < 0.6) {
+                        if (h.type === '逃げ') targetSpeed *= 1.1;
+                        if (h.type === '先行') targetSpeed *= 1.0;
+                        if (h.type === '差し') targetSpeed *= 0.9;
+                        if (h.type === '追込') targetSpeed *= 0.85;
+                    } else {
+                        if (h.currentStamina > 0) {
+                            h.currentStamina -= (0.4 - h.guts / 400); 
+                            if (h.type === '追込') targetSpeed *= 1.7;
+                            if (h.type === '差し') targetSpeed *= 1.4;
+                            if (h.type === '先行') targetSpeed *= 1.1;
+                            if (h.type === '逃げ') targetSpeed *= 0.9;
+                        } else {
+                            targetSpeed *= 0.7;
+                        }
+                    }
+
+                    const pseudoRandom = Math.sin(tick * 0.1 + h.id) * 0.05;
+                    targetSpeed *= (h.condition.mod * h.jockey.skill + pseudoRandom);
+                    
+                    const prevX = h.x;
+                    h.currentSpeed = targetSpeed;
+                    h.x += h.currentSpeed;
+                    h.yOffset = Math.sin(tick * h.currentSpeed * 0.4) * 5;
+
+                    if (h.x > currentTopX) currentTopX = h.x;
+
+                    if (h.x >= raceLength) {
+                        h.hasFinished = true;
+                        h.finishTick = tick - 1 + (raceLength - prevX) / h.currentSpeed;
+                        h.finishTick += h.randomFactor * 0.01;
+                    }
+
+                    const horseEl = document.getElementById(`horse-dom-${h.no}`);
+                    if (horseEl) {
+                        horseEl.style.left = `${(h.x / 1000) * 85}%`;
+                        horseEl.style.top = `calc(${index * 12 + 2}% + ${h.yOffset}px)`;
+                        const delayStr = (h.isDelayed && h.x < 100) ? '💦' : '';
+                        document.getElementById(`horse-emoji-${h.no}`).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100">${delayStr}</span>🏇`;
+                        
+                        const dustEl = document.getElementById(`horse-dust-${h.no}`);
+                        if (h.currentSpeed > 1.5 && !h.hasFinished) {
+                            dustEl.style.display = 'block';
+                            dustEl.classList.add('dust-anim');
+                        } else {
+                            dustEl.style.display = 'none';
+                        }
+                    }
+                });
+
+                const progInt = Math.min(100, Math.floor((currentTopX / raceLength) * 100));
+                const sortedHorses = [...state.horsesRef].filter(h => !h.isRetired).sort((a, b) => b.x - a.x);
+                const topHorse = sortedHorses[0];
+                const secondHorse = sortedHorses[1];
+                let newMsg = state.message;
+
+                if (accidentMsg) {
+                    newMsg = accidentMsg; 
+                } else if (topHorse && secondHorse) {
+                    if (tick === 1) {
+                        newMsg = "ゲートが開いた！ 各馬一斉にスタート！";
+                    } else if (progInt >= 15 && state.lastProg < 15) {
+                        newMsg = `先頭に立ったのは ${topHorse.no}番 ${topHorse.name}！ 軽快に飛ばします！`;
+                    } else if (progInt >= 40 && state.lastProg < 40) {
+                        newMsg = `第3コーナーへ向かう！ 依然として ${topHorse.name} がリード！`;
+                    } else if (progInt >= 60 && state.lastProg < 60) {
+                        newMsg = `第4コーナーカーブ！ 後続も徐々に差を詰めてきたぞ！`;
+                    } else if (progInt >= 75 && state.lastProg < 75) {
+                        newMsg = `最後の直線に入った！ 先頭は ${topHorse.name}！ ここからスパート！！`;
+                    } else if (progInt >= 90 && state.lastProg < 90) {
+                        if (topHorse.x - secondHorse.x < 25) {
+                            newMsg = `残りわずか！ ${topHorse.name} と ${secondHorse.name} の激しい叩き合いだ！！`;
+                        } else {
+                            newMsg = `${topHorse.name}、完全に抜け出した！ これは強い！！`;
+                        }
+                    }
+                }
+
+                if (progInt > state.lastProg) {
+                    state.lastProg = progInt;
+                }
+                
+                if (newMsg !== state.message) {
+                    window.setMessage(`🎙️ ${newMsg}`);
+                }
+
+                if (allFinished) {
+                    const bg = document.getElementById('race-bg');
+                    if(bg) bg.style.animationPlayState = 'paused';
+                    window.finishRaceLocal();
+                } else {
+                    state.animationRef = requestAnimationFrame(animate);
+                }
+            };
+            
+            state.animationRef = requestAnimationFrame(animate);
+        };
+
+        window.skipRace = () => {
+            cancelAnimationFrame(state.animationRef);
+            let safetyCounter = 0;
+            while(state.horsesRef.some(h => !h.hasFinished && !h.isRetired) && safetyCounter < 1000) {
+                state.horsesRef.forEach(h => {
+                    if(!h.hasFinished && !h.isRetired) {
+                        if (h.isAccident) {
+                            h.isRetired = true;
+                            h.finishTick = Infinity;
+                        } else {
+                            const prevX = h.x;
+                            const speed = h.speed / 5;
+                            h.x += speed;
+                            if (h.x >= 1000) {
+                                h.hasFinished = true;
+                                h.finishTick = safetyCounter - 1 + (1000 - prevX) / speed + (h.randomFactor * 0.01);
+                            }
+                        }
+                    }
+                });
+                safetyCounter++;
+            }
+            window.finishRaceLocal();
+        };
+
+        window.finishRaceLocal = function() {
+            cancelAnimationFrame(state.animationRef);
+            
+            state.horsesRef.sort((a, b) => {
+                if (a.isRetired && !b.isRetired) return 1;
+                if (!a.isRetired && b.isRetired) return -1;
+                return a.finishTick - b.finishTick;
+            });
+            
+            state.raceResult = state.horsesRef;
+            state.phase = 'result'; 
+
+            if (state.mode === 'single' || state.mode === 'hardcore') {
+                state.raceResult.forEach((h, idx) => {
+                    if (h.isMyHorse && h.originalRef) {
+                        h.originalRef.lastRaceResult = h.isRetired ? '中止' : `${idx + 1}着`;
+                    }
+                });
+            } else {
+                state.raceResult.forEach((h, idx) => {
+                    if (h.isMyHorse && h.ownerSessionId === localSessionId) {
+                        const target = state.myHorses.find(myH => myH.name === h.name);
+                        if (target) {
+                            target.lastRaceResult = h.isRetired ? '中止' : `${idx + 1}着`;
+                        }
+                    }
+                });
+                if (currentRoomId && currentUser) {
+                     updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                        [`players.${localSessionId}.myHorses`]: state.myHorses
+                    }).catch(e => console.error(e));
+                }
+            }
+
+            window.render(); 
+
+            window.setMessage("レース終了！払い戻しを計算中...");
+            setTimeout(() => {
+                window.calculatePayouts();
+                if (state.mode === 'multi' && isHost) {
+                    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                        phase: 'result'
+                    }).catch(e => console.error(e));
+                }
+            }, 1000);
+        };
+
+        window.calculatePayouts = function() {
+            let totalPayout = 0;
+            let prizeMsg = "";
+            const validResult = state.raceResult.filter(h => !h.isRetired);
+            const top1 = validResult[0] || state.raceResult[0];
+            const top2 = validResult[1] || state.raceResult[1];
+            const top3 = validResult[2] || state.raceResult[2];
+            const rIds = validResult.map(h => h.no);
+
+            let totalPrize = 0;
+            let rankMsgs = [];
+            state.raceResult.forEach((h, rank) => {
+                if (h.isMyHorse && h.ownerSessionId === localSessionId && !h.isRetired) {
+                    let prize = 0;
+                    if (rank === 0) prize = 10000;
+                    else if (rank === 1) prize = 3000;
+                    else if (rank === 2) prize = 1000;
+                    
+                    if (prize > 0) {
+                        totalPrize += prize;
+                        rankMsgs.push(`${h.name}が${rank+1}着`);
+                    }
+                }
+            });
+
+            if (totalPrize > 0) {
+                totalPayout += totalPrize;
+                prizeMsg = ` 愛馬（${rankMsgs.join('、')}）が賞金計 ${totalPrize.toLocaleString()} 円獲得！`;
+            }
+
+            state.bets.forEach(bet => {
+                let isHit = false;
+                let payoutRate = 0;
+                const getOdds = (no) => state.horses.find(h => h.no === no)?.odds || 1;
+
+                switch (bet.type) {
+                    case '単勝': isHit = bet.horses[0] === top1.no; payoutRate = getOdds(top1.no); break;
+                    case '複勝': isHit = rIds.slice(0,3).includes(bet.horses[0]); payoutRate = Math.max(1.1, getOdds(bet.horses[0]) / 3); break;
+                    case '枠連':
+                    case '馬連': isHit = rIds.slice(0,2).includes(bet.horses[0]) && rIds.slice(0,2).includes(bet.horses[1]); payoutRate = getOdds(top1.no) * getOdds(top2.no) * 0.8; break;
+                    case '馬単': isHit = bet.horses[0] === top1.no && bet.horses[1] === top2.no; payoutRate = getOdds(top1.no) * getOdds(top2.no) * 1.5; break;
+                    case 'ワイド': isHit = rIds.slice(0,3).includes(bet.horses[0]) && rIds.slice(0,3).includes(bet.horses[1]); payoutRate = getOdds(bet.horses[0]) * getOdds(bet.horses[1]) * 0.3; break;
+                    case '3連複': isHit = rIds.slice(0,3).includes(bet.horses[0]) && rIds.slice(0,3).includes(bet.horses[1]) && rIds.slice(0,3).includes(bet.horses[2]); payoutRate = getOdds(top1.no) * getOdds(top2.no) * getOdds(top3.no) * 0.5; break;
+                    case '3連単': isHit = bet.horses[0] === top1.no && bet.horses[1] === top2.no && bet.horses[2] === top3.no; payoutRate = getOdds(top1.no) * getOdds(top2.no) * getOdds(top3.no) * 2.0; break;
+                }
+                
+                bet.isHit = isHit;
+                if (isHit) {
+                    if (state.mode === 'hardcore') {
+                        payoutRate = 10000;
+                    }
+                    totalPayout += Math.floor(bet.amount * payoutRate);
+                }
+            });
+
+            if (state.mode === 'hardcore' && state.bets.length > 0) {
+                const hasHit = state.bets.some(b => b.isHit);
+                if (!hasHit) {
+                    state.money = 0;
+                    state.myHorses = [];
+                    state.multiBonusLevel = 1;
+                    
+                    window.setMessage(`☠️ ハズレ... 全財産と愛馬を没収されました。`);
+                    window.render();
+                    
+                    setTimeout(() => {
+                        window.openModal(`
+                            <h3 class="text-2xl text-red-500 font-bold mb-4 text-center">☠️ YOU DIED ☠️</h3>
+                            <p class="text-sm text-gray-300 mb-6 text-center">馬券がハズレたため、<br>全財産と愛馬が没収されました。</p>
+                            <div class="text-center">
+                                <button onclick="executeGoToTitle()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">タイトルへ</button>
+                            </div>
+                        `);
+                    }, 1000);
+                    return; 
+                }
+            }
+
+            if (totalPayout > 0) {
+                window.setMessage(`的中！ 払い戻し・賞金合計 ${totalPayout.toLocaleString()} 円 です！${prizeMsg}`);
+                window.syncMoney(state.money + totalPayout);
+            } else if (state.bets.length > 0) {
+                window.setMessage(`ハズレ... 次のレースに期待しましょう。${prizeMsg}`);
+            } else {
+                window.setMessage(`馬券を買っていませんでしたね。${prizeMsg}`);
+            }
+            window.render(); 
+        };
+
+        // --- HTML生成 ---
+        function getTitleHTML() {
+            if (!state.loginSelected) {
+                return `
+                <div class="relative flex flex-col items-center justify-center min-h-[500px] md:min-h-[600px] bg-[#1a472a] border-2 border-amber-800 shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
+                    <div class="absolute top-0 left-0 w-[200%] h-full pointer-events-none bg-scroll opacity-50"></div>
+                    
+                    <div class="z-20 text-center mb-10 transform hover:scale-105 transition-transform duration-500">
+                        <h1 class="text-5xl md:text-7xl font-bold text-yellow-400 tracking-widest drop-shadow-[0_5px_10px_rgba(0,0,0,1)] mb-4" style="-webkit-text-stroke: 2px #b45309;">
+                            RETRO<br>STAR HORSE
+                        </h1>
+                        <p class="text-amber-300 text-sm tracking-widest bg-black/60 inline-block px-4 py-1.5 rounded border border-amber-900/50">レトロ競馬シミュレーター</p>
+                    </div>
+
+                    <div class="z-20 flex flex-col gap-4 w-72 md:w-80 bg-black/80 p-6 rounded border-2 border-amber-600 shadow-[0_0_20px_rgba(0,0,0,0.8)]">
+                        <p class="text-center text-sm text-gray-300 mb-2">プレイ方法を選んでください</p>
+                        
+                        <button onclick="loginWithGoogleTitle()" class="bg-white text-gray-900 font-bold text-lg py-3 rounded-sm border-2 border-gray-300 shadow-md active:transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 hover:bg-gray-100">
+                            <svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                            Googleでログイン
+                        </button>
+                        <p class="text-[10px] text-blue-400 text-center -mt-3">クラウドにセーブデータを保存できます</p>
+                        
+                        <div class="border-b border-gray-600 my-1"></div>
+
+                        <button onclick="selectGuest()" class="bg-gray-800 text-white font-bold text-lg py-3 rounded-sm border-2 border-gray-600 shadow-md active:transform active:scale-[0.98] transition-all hover:bg-gray-700">
+                            ゲストで遊ぶ
+                        </button>
+                        <p class="text-[10px] text-gray-400 text-center -mt-3">データは今のブラウザにのみ保存されます</p>
+                    </div>
+                </div>
+                `;
+            }
+
+            return `
+            <div class="relative flex flex-col items-center justify-center min-h-[500px] md:min-h-[600px] bg-[#1a472a] border-2 border-amber-800 shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
+                <div class="absolute top-0 left-0 w-[200%] h-full pointer-events-none bg-scroll opacity-50"></div>
+                
+                <button onclick="showSettingsModal()" class="absolute top-4 right-4 bg-gray-800 hover:bg-gray-700 text-amber-500 px-3 py-1.5 rounded border border-amber-700 transition-colors z-20 shadow-md font-bold text-sm">
+                    ⚙️ 設定
+                </button>
+
+                <div class="z-20 text-center mb-10 transform hover:scale-105 transition-transform duration-500">
+                    <h1 class="text-5xl md:text-7xl font-bold text-yellow-400 tracking-widest drop-shadow-[0_5px_10px_rgba(0,0,0,1)] mb-4" style="-webkit-text-stroke: 2px #b45309;">
+                        RETRO<br>STAR HORSE
+                    </h1>
+                    <p class="text-amber-300 text-sm tracking-widest bg-black/60 inline-block px-4 py-1.5 rounded border border-amber-900/50">レトロ競馬シミュレーター</p>
+                </div>
+
+                <div class="z-20 flex flex-col gap-3 w-64 md:w-72">
+                    <button onclick="showSinglePlayerMenu()" class="bg-gradient-to-b from-red-600 to-red-900 hover:from-red-500 hover:to-red-800 text-white font-bold text-xl md:text-2xl py-3 rounded-sm border-2 border-red-400 shadow-[0_0_20px_rgba(220,38,38,0.8)] active:transform active:scale-[0.98] transition-all tracking-widest">
+                        ひとりで遊ぶ
+                    </button>
+                    <button onclick="showMultiplayerMenu()" class="bg-gradient-to-b from-blue-600 to-blue-900 hover:from-blue-500 hover:to-blue-800 text-white font-bold text-xl md:text-2xl py-3 rounded-sm border-2 border-blue-400 shadow-[0_0_20px_rgba(37,99,235,0.8)] active:transform active:scale-[0.98] transition-all tracking-widest">
+                        みんなで遊ぶ
+                    </button>
+                    <div class="flex gap-2">
+                        <button onclick="showShopModal()" class="w-1/2 bg-gradient-to-b from-yellow-600 to-yellow-800 hover:from-yellow-500 hover:to-yellow-700 text-black font-bold text-base md:text-lg py-2 rounded-sm border-2 border-yellow-500 transition-colors shadow-lg active:transform active:scale-[0.98]">
+                            🛒 ショップ
+                        </button>
+                        <button onclick="showLoadModal()" class="w-1/2 bg-gray-800 hover:bg-gray-700 text-amber-500 font-bold text-base md:text-lg py-2 rounded-sm border-2 border-gray-600 transition-colors shadow-lg active:transform active:scale-[0.98]">
+                            📂 ロード
+                        </button>
+                    </div>
+                </div>
+
+                <div class="absolute bottom-8 w-full text-center opacity-40 text-5xl md:text-6xl pointer-events-none z-10 flex justify-center gap-8">
+                    <div class="transform -scale-x-100 animate-bounce" style="animation-duration: 0.8s;">🏇💨</div>
+                    <div class="transform -scale-x-100 animate-bounce" style="animation-duration: 0.9s; animation-delay: 0.2s;">🏇💨</div>
+                    <div class="transform -scale-x-100 animate-bounce" style="animation-duration: 0.85s; animation-delay: 0.1s;">🏇💨</div>
+                </div>
+            </div>
+            `;
+        }
+
+        function getLobbyHTML() {
+            if (!roomData) return `<div class="text-white text-center p-8">読み込み中...</div>`;
+            
+            const playersHtml = Object.values(roomData.players).map(p => `
+                <div class="flex items-center justify-between mb-2 p-2 bg-gray-800 rounded border border-gray-700">
+                    <div>
+                        <span class="text-white font-bold">${p.name}</span>
+                        <span class="text-xs text-yellow-400 ml-2">💰 ${p.money?.toLocaleString() || 0}円</span>
+                    </div>
+                    <span class="text-xs ${p.ready ? 'text-green-400' : 'text-gray-400'}">${p.ready ? '準備OK' : '準備中...'}</span>
+                </div>
+            `).join('');
+
+            return `
+            <div class="flex flex-col items-center justify-center p-8 bg-gray-900 border-2 border-amber-800 shadow-inner min-h-[400px]">
+                <h2 class="text-3xl text-yellow-400 font-bold mb-4 drop-shadow-md">🌐 ONLINE LOBBY</h2>
+                <div class="bg-black border border-amber-500 px-6 py-3 rounded mb-8 shadow-[0_0_15px_rgba(245,158,11,0.5)] text-center">
+                    <span class="text-amber-600 text-sm block mb-1">ROOM ID</span>
+                    <span class="text-4xl text-white font-bold tracking-widest">${currentRoomId}</span>
+                </div>
+                
+                <div class="w-full max-w-md bg-black border border-amber-900/50 p-4 rounded mb-8 shadow-inner">
+                    <h3 class="text-amber-300 text-sm mb-3 border-b border-amber-800 pb-1">■ 参加プレイヤー</h3>
+                    <div class="max-h-48 overflow-y-auto hide-scrollbar">
+                        ${playersHtml}
+                    </div>
+                </div>
+
+                ${isHost ? `
+                    <button onclick="startMultiRace()" class="w-full max-w-md bg-gradient-to-b from-blue-600 to-blue-900 hover:from-blue-500 hover:to-blue-800 text-white font-bold text-xl py-4 rounded-sm border-2 border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.6)] active:transform active:scale-[0.98] transition-all tracking-widest">
+                        レースへ進む ▶
+                    </button>
+                    <p class="text-[10px] text-gray-400 mt-2">※全員揃ったら押してください</p>
+                ` : `
+                    <div class="text-center p-4 border border-gray-700 bg-gray-800 rounded w-full max-w-md">
+                        <p class="text-amber-400 font-bold animate-pulse">ホストが開始するのを待っています...</p>
+                    </div>
+                `}
+            </div>
+            `;
+        }
+
+        function getCreateHorseHTML() {
+            const types = ["逃げ", "先行", "差し", "追込"];
+            const typeBtns = types.map(t => `
+                <button onclick="setMyHorseType('${t}')" class="py-2 px-4 text-sm font-bold rounded-sm border transition-colors ${state.myHorseTempType === t ? 'bg-amber-500 text-black border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'bg-black text-amber-600 border-amber-900 hover:bg-gray-800 hover:text-amber-400'}">${t}</button>
+            `).join('');
+
+            return `
+            <div class="flex flex-col items-center justify-center p-8 bg-gray-900 border-2 border-amber-800 shadow-inner min-h-[400px]">
+                <h2 class="text-2xl text-yellow-400 font-bold mb-6 drop-shadow-md">🏇 マイホース作成</h2>
+                
+                <div class="w-full max-w-md space-y-6">
+                    <div>
+                        <label class="block text-amber-300 text-sm font-bold mb-2">■ 馬名入力 (最大10文字)</label>
+                        <input id="myhorse-name-input" type="text" maxlength="10" placeholder="マイホース" class="w-full bg-black border-2 border-amber-700 text-white p-3 rounded focus:outline-none focus:border-yellow-500 focus:shadow-[0_0_10px_rgba(250,204,21,0.5)]">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-amber-300 text-sm font-bold mb-2">■ 脚質選択 (ポジション)</label>
+                        <div class="flex gap-2">
+                            ${typeBtns}
+                        </div>
+                    </div>
+
+                    <div class="pt-6 border-t border-amber-800/50">
+                        <button onclick="startTraining()" class="w-full bg-gradient-to-b from-red-600 to-red-900 hover:from-red-500 hover:to-red-800 text-white font-bold text-xl py-4 rounded-sm border-2 border-red-400 shadow-[0_0_15px_rgba(220,38,38,0.6)] active:transform active:scale-[0.98] transition-all tracking-widest">
+                            育成スタート ▶
+                        </button>
+                    </div>
+                </div>
+            </div>
+            `;
+        }
+
+        function getTrainingHTML() {
+            const hpRatio = state.training.hp / state.training.maxHp;
+            let hpColor = "bg-green-500";
+            if(hpRatio < 0.5) hpColor = "bg-yellow-500";
+            if(hpRatio < 0.2) hpColor = "bg-red-500";
+
+            return `
+            <div class="flex flex-col md:flex-row gap-4 p-4 min-h-[400px]">
+                <div class="w-full md:w-1/3 flex flex-col gap-4">
+                    <div class="border-2 border-amber-800 bg-gray-900 p-4 shadow-inner">
+                        <h3 class="text-amber-300 text-lg font-bold border-b border-amber-800 pb-2 mb-4">📝 ${state.trainingHorse.name}</h3>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <div class="flex justify-between text-xs text-amber-500 mb-1">
+                                    <span>スピード (最高速)</span>
+                                    <span class="font-bold text-white">${state.trainingHorse.speed}</span>
+                                </div>
+                                <div class="w-full bg-black h-3 border border-amber-900/50 rounded overflow-hidden">
+                                    <div class="bg-blue-500 h-full transition-all duration-300" style="width: ${Math.min(100, state.trainingHorse.speed/1.5)}%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-xs text-amber-500 mb-1">
+                                    <span>スタミナ (持久力)</span>
+                                    <span class="font-bold text-white">${state.trainingHorse.stamina}</span>
+                                </div>
+                                <div class="w-full bg-black h-3 border border-amber-900/50 rounded overflow-hidden">
+                                    <div class="bg-orange-500 h-full transition-all duration-300" style="width: ${Math.min(100, state.trainingHorse.stamina/1.5)}%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-xs text-amber-500 mb-1">
+                                    <span>根性 (競り合い)</span>
+                                    <span class="font-bold text-white">${state.trainingHorse.guts}</span>
+                                </div>
+                                <div class="w-full bg-black h-3 border border-amber-900/50 rounded overflow-hidden">
+                                    <div class="bg-red-500 h-full transition-all duration-300" style="width: ${Math.min(100, state.trainingHorse.guts/1.5)}%"></div>
+                                </div>
+                            </div>
+                            <div class="pt-2 mt-2 border-t border-amber-800/50 flex justify-between text-sm">
+                                <span class="text-amber-600">脚質</span>
+                                <span class="font-bold text-yellow-400">${state.trainingHorse.type}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="w-full md:w-2/3 flex flex-col">
+                    <div class="border-2 border-amber-800 bg-gray-900 p-4 flex-1 flex flex-col shadow-[inset_0_0_15px_rgba(0,0,0,0.8)]">
+                        <div class="flex justify-between items-end border-b border-amber-800 pb-2 mb-4">
+                            <div class="text-amber-300 text-lg font-bold">🎯 調教メニュー</div>
+                            <div class="text-white bg-black px-3 py-1 rounded border border-amber-800 shadow-inner">
+                                残り: <span class="font-bold text-yellow-400 text-xl">${state.training.turn}</span> 週
+                            </div>
+                        </div>
+
+                        <div class="mb-6">
+                            <div class="flex justify-between text-xs text-amber-500 mb-1">
+                                <span>体力 (HP)</span>
+                                <span class="font-bold text-white">${state.training.hp} / ${state.training.maxHp}</span>
+                            </div>
+                            <div class="w-full bg-black h-4 border border-amber-900/50 rounded overflow-hidden shadow-inner p-px">
+                                <div class="${hpColor} h-full transition-all duration-300" style="width: ${(state.training.hp / state.training.maxHp) * 100}%"></div>
+                            </div>
+                            ${state.training.hp <= 40 ? '<p class="text-red-400 text-[10px] mt-1 animate-pulse">※怪我の確率が上がっています！</p>' : ''}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 mt-auto">
+                            <button onclick="doTraining('speed')" class="h-16 bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold rounded-sm border border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>芝コース</span>
+                                <span class="text-[10px] text-blue-200 font-normal">スピードUP</span>
+                            </button>
+                            <button onclick="doTraining('stamina')" class="h-16 bg-gradient-to-b from-orange-600 to-orange-800 hover:from-orange-500 hover:to-orange-700 text-white font-bold rounded-sm border border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>ダートコース</span>
+                                <span class="text-[10px] text-orange-200 font-normal">スタミナUP</span>
+                            </button>
+                            <button onclick="doTraining('guts')" class="h-16 bg-gradient-to-b from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 text-white font-bold rounded-sm border border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>坂路</span>
+                                <span class="text-[10px] text-red-200 font-normal">根性UP</span>
+                            </button>
+                            <button onclick="doTraining('rest')" class="h-16 bg-gradient-to-b from-green-700 to-green-900 hover:from-green-600 hover:to-green-800 text-white font-bold rounded-sm border border-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>休養</span>
+                                <span class="text-[10px] text-green-200 font-normal">体力回復</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+        }
+
+        function getBettingHTML() {
+            const betTypeBtns = BET_TYPES.map(type => `
+                <button onclick="setBetType('${type}')" class="py-1.5 text-xs font-bold rounded-sm border transition-colors ${state.selectedBetType === type ? 'bg-amber-500 text-black border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'bg-black text-amber-600 border-amber-900 hover:bg-gray-800 hover:text-amber-400'}">${type}</button>
+            `).join('');
+
+            const amountInputHtml = `
+                <div class="mt-2 mb-4 bg-gray-900 border-2 border-amber-700 rounded-sm p-2 flex items-center shadow-[0_0_8px_rgba(245,158,11,0.3)]">
+                    <span class="text-amber-500 font-bold text-xs mr-2">BET:</span>
+                    <input type="number" value="${state.betAmount}" min="100" step="100" onchange="updateBetAmount(this.value)" onkeyup="updateBetAmount(this.value)" class="flex-1 bg-black text-amber-400 text-right outline-none font-bold text-base px-2 py-1 rounded-sm border border-amber-900/50 focus:border-amber-500 transition-colors">
+                    <span class="text-amber-600 text-xs font-bold ml-2">円</span>
+                </div>
+            `;
+
+            let ownerMenu = "";
+            let playersStatusHtml = "";
+
+            if (state.mode === 'single' || state.mode === 'hardcore') {
+                const buyCost = 50000 * (state.myHorses.length + 1);
+                let myHorseList = "";
+                if (state.myHorses.length > 0) {
+                    myHorseList = state.myHorses.map((h, i) => {
+                        const targetId = h.id || i; 
+                        return `
+                        <div class="mb-1 border-b border-amber-900/50 pb-1">
+                            <div class="flex justify-between items-center mb-1">
+                                <p class="text-[10px] text-white font-bold">${h.name} <span class="text-yellow-400">(${h.type})</span></p>
+                                <button onclick="showSellModal(${targetId})" class="bg-red-800 hover:bg-red-700 text-white text-[9px] px-2 py-0.5 rounded border border-red-600 transition-colors">売却</button>
+                            </div>
+                            <p class="text-[9px] text-amber-500">ｽﾋﾟ:${h.speed} ｽﾀ:${h.stamina} 根性:${h.guts} | 前走:${h.lastRaceResult}</p>
+                        </div>
+                    `}).join('');
+                } else {
+                    myHorseList = `<p class="text-[9px] text-gray-400 mb-2">お金を貯めて馬主になりましょう</p>`;
+                }
+
+                ownerMenu = `
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 mt-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)] flex flex-col max-h-48">
+                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1 shrink-0">■ OWNER MENU</div>
+                        <div class="overflow-y-auto hide-scrollbar mb-2 flex-1">
+                            ${myHorseList}
+                        </div>
+                        <button onclick="buyHorse()" class="w-full bg-gradient-to-b from-purple-600 to-purple-900 hover:from-purple-500 hover:to-purple-800 text-white font-bold py-1.5 rounded-sm border border-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.3)] active:transform active:scale-[0.98] transition-all text-xs tracking-wider shrink-0">
+                            馬を購入 (${buyCost/10000}万)
+                        </button>
+                    </div>
+                `;
+            } else {
+                ownerMenu = `
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 mt-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)] flex flex-col text-center">
+                        <div class="text-amber-300 text-xs mb-1 border-b border-amber-800 pb-1">■ MULTIPLAYER</div>
+                        <p class="text-[9px] text-amber-400 mt-1 mb-1">あなたの育成馬がランダムで出走します！</p>
+                    </div>
+                `;
+
+                if (roomData && roomData.players) {
+                    playersStatusHtml = `
+                        <div class="border-2 border-amber-800 bg-gray-900 p-2 mt-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)] flex flex-col max-h-40">
+                            <div class="text-amber-300 text-xs mb-1 border-b border-amber-800 pb-1 shrink-0">■ PLAYERS STATUS</div>
+                            <div class="overflow-y-auto hide-scrollbar text-[10px] flex-1">
+                                ${Object.values(roomData.players).map(p => `
+                                    <div class="flex justify-between items-center mb-1 pb-1 border-b border-gray-800">
+                                        <div>
+                                            <span class="text-white text-xs font-bold">${p.name}</span>
+                                            <span class="text-yellow-400 ml-1">💰${p.money?.toLocaleString() || 0}</span>
+                                        </div>
+                                        <span class="${p.ready ? 'text-green-400 font-bold' : 'text-gray-500'}">${p.ready ? 'OK' : '予想中'}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            const horseRows = state.horses.map(h => {
+                const isSelected = state.selectedHorses.includes(h.no);
+                
+                const isMyHorse = h.isMyHorse && (state.mode === 'single' || state.mode === 'hardcore' || h.ownerSessionId === localSessionId);
+                const isOtherPlayerHorse = h.isMyHorse && state.mode === 'multi' && h.ownerSessionId !== localSessionId;
+
+                let baseClass = isSelected ? 'bg-amber-600 border-amber-300 shadow-[inset_0_0_10px_rgba(0,0,0,0.4)] transform scale-[1.01]' : 'bg-black border-gray-800 hover:bg-gray-800 hover:border-amber-900';
+                
+                if (isMyHorse && !isSelected) {
+                    baseClass = 'bg-blue-900/40 border-blue-800 hover:bg-blue-800/60 hover:border-blue-500';
+                } else if (isOtherPlayerHorse && !isSelected) {
+                    baseClass = 'bg-purple-900/40 border-purple-800 hover:bg-purple-800/60 hover:border-purple-500';
+                }
+
+                const noClass = isSelected ? 'bg-black text-amber-500 border border-amber-500' : `${h.waku.bg} ${h.waku.text} border ${h.waku.border}`;
+                
+                let rankColor = "text-gray-300";
+                if(h.jockey.rank === "S") rankColor = "text-yellow-300 drop-shadow-md";
+                if(h.jockey.rank === "A") rankColor = "text-red-300";
+                if(h.jockey.rank === "C") rankColor = "text-blue-300";
+
+                return `
+                    <div onclick="handleHorseSelect(${h.no})" class="flex items-center p-1.5 md:p-2 cursor-pointer border transition-all ${baseClass}">
+                        <div class="w-6 h-6 flex items-center justify-center font-bold text-sm rounded-sm shrink-0 ${noClass}">${h.no}</div>
+                        <div class="w-4 text-center font-bold ml-1 shrink-0 ${isSelected ? 'text-black' : 'text-yellow-500 drop-shadow-md'}">${h.mark}</div>
+                        <div class="flex-1 ml-2 flex flex-col min-w-0">
+                            <div class="font-bold truncate tracking-wide flex items-center gap-1 ${isSelected ? 'text-black' : (isMyHorse ? 'text-blue-300' : (isOtherPlayerHorse ? 'text-purple-300' : 'text-white'))}">
+                                ${h.name} 
+                                ${isMyHorse ? '<span class="bg-blue-600 text-white text-[9px] px-1 rounded shadow-sm">愛馬</span>' : ''}
+                                ${isOtherPlayerHorse ? `<span class="bg-purple-600 text-white text-[9px] px-1 rounded shadow-sm">${h.ownerName}</span>` : ''}
+                            </div>
+                            <div class="text-[10px] flex gap-2 mt-1 ${isSelected ? 'text-amber-950 font-bold' : 'text-amber-300/80'}">
+                                <span class="bg-black/30 px-1 rounded border ${isSelected ? 'border-amber-900/30' : 'border-amber-700/50'}">騎手:<span class="${isSelected ? 'text-black' : rankColor}">${h.jockey.name}[${h.jockey.rank}]</span></span>
+                                <span class="bg-black/30 px-1 rounded border ${isSelected ? 'border-amber-900/30' : 'border-amber-700/50'}">前走:${h.lastRace}</span>
+                                <span class="bg-black/30 px-1 rounded border ${isSelected ? 'border-amber-900/30' : 'border-amber-700/50'}">馬体:${h.weightStr}</span>
+                            </div>
+                        </div>
+                        <div class="w-8 text-center text-[10px] shrink-0 ${isSelected ? 'text-black font-bold' : 'text-amber-500/60'}">${h.type}</div>
+                        <div class="w-12 text-center text-[10px] shrink-0 ${isSelected ? 'text-black font-bold' : h.condition.color}"><span class="hidden md:inline">${h.condition.icon}${h.condition.label}</span><span class="md:hidden">${h.condition.icon}</span></div>
+                        <div class="w-12 text-right font-bold tracking-wider shrink-0 ${isSelected ? 'text-black' : 'text-cyan-400'}">${h.odds.toFixed(1)}</div>
+                    </div>
+                `;
+            }).join('');
+
+            const betList = state.bets.length === 0 ? `<p class="text-amber-800/50 text-[10px] text-center mt-4">NO TICKET</p>` : `<ul class="space-y-1">` + state.bets.map((bet, idx) => `
+                <li class="flex justify-between items-center text-[10px] bg-gray-900 p-1.5 border border-amber-900/50 hover:border-amber-700 transition-colors">
+                    <div class="flex flex-col">
+                        <span class="text-yellow-500 font-bold tracking-wide">[${bet.type}]</span>
+                        <span class="text-white mt-0.5">${bet.horses.join(' - ')} <span class="text-amber-400 ml-2 font-bold">${bet.amount}円</span></span>
+                    </div>
+                    <button onclick="removeBet(${idx})" class="text-red-600 hover:text-red-400 text-lg px-2 font-bold">&times;</button>
+                </li>
+            `).join('') + `</ul>`;
+            
+            let startButtonHtml = '';
+            if (state.mode === 'multi') {
+                const myReady = roomData?.players[localSessionId]?.ready || false;
+                if (isHost) {
+                    const allReady = roomData ? Object.values(roomData.players).every(p => p.ready) : false;
+                    
+                    if (!myReady) {
+                        startButtonHtml = `
+                            <button onclick="toggleReady()" class="h-16 bg-gradient-to-b from-blue-600 to-blue-900 hover:from-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.6)] font-bold text-lg rounded-sm border-2 active:transform active:scale-[0.98] transition-all tracking-widest relative">
+                                READY (準備完了)
+                            </button>
+                            <div class="text-[10px] text-center mt-1 text-gray-400">馬券を買ったら押してください</div>
+                        `;
+                    } else {
+                        startButtonHtml = `
+                            <div class="flex flex-col gap-1">
+                                <button onclick="toggleReady()" class="h-8 bg-green-700 hover:bg-green-600 border-green-500 text-white font-bold text-xs rounded-sm border-2 transition-all">
+                                    準備取消
+                                </button>
+                                <button onclick="startMultiRun()" ${allReady ? '' : 'disabled'} class="h-12 ${allReady ? 'bg-gradient-to-b from-red-600 to-red-900 shadow-[0_0_10px_rgba(220,38,38,0.6)] hover:from-red-500 hover:to-red-800' : 'bg-gray-700 border-gray-600 text-gray-400 cursor-not-allowed'} font-bold text-xl rounded-sm border-2 border-red-400 active:transform active:scale-[0.98] transition-all tracking-widest relative overflow-hidden group">
+                                    RACE START
+                                </button>
+                                <div class="text-[10px] text-center text-gray-400">全員がOKになると押せます</div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    startButtonHtml = `
+                        <button onclick="toggleReady()" class="h-16 ${myReady ? 'bg-green-700 border-green-500 text-white' : 'bg-gradient-to-b from-blue-600 to-blue-900 hover:from-blue-500 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.6)]'} font-bold text-lg rounded-sm border-2 active:transform active:scale-[0.98] transition-all tracking-widest relative">
+                            ${myReady ? '待機中... (取消)' : 'READY (準備完了)'}
+                        </button>
+                    `;
+                }
+            } else {
+                startButtonHtml = `
+                    <button onclick="startRace()" class="h-16 bg-gradient-to-b from-red-600 to-red-900 hover:from-red-500 hover:to-red-800 text-white font-bold text-xl rounded-sm border-2 border-red-400 shadow-[0_0_15px_rgba(220,38,38,0.6)] active:transform active:scale-[0.98] transition-all tracking-widest relative overflow-hidden group">
+                        <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-500"></div>
+                        RACE START
+                    </button>
+                `;
+            }
+
+            return `
+            <div class="flex flex-col md:flex-row gap-2">
+                <div class="w-full md:w-1/4 space-y-2 flex flex-col">
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2">
+                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1">■ SELECT BET TYPE</div>
+                        <div class="grid grid-cols-2 gap-1">${betTypeBtns}</div>
+                    </div>
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 flex-1 flex flex-col">
+                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1">■ INPUT COIN</div>
+                        ${amountInputHtml}
+                        <div class="text-center mt-auto pt-2 border-t border-amber-800">
+                            <div class="text-[10px] text-amber-500/70 mb-1 h-4">選択中: ${state.selectedHorses.join(' - ') || 'なし'}</div>
+                            <button onclick="addBet()" class="w-full bg-gradient-to-b from-amber-500 to-amber-700 hover:from-amber-400 hover:to-amber-600 text-black font-bold py-2.5 rounded-sm border-b-4 border-amber-900 active:border-b-0 active:mt-1 transition-all shadow-md">ENTRY</button>
+                        </div>
+                    </div>
+                    ${ownerMenu}
+                    ${playersStatusHtml}
+                </div>
+                <div class="w-full md:w-2/4">
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 h-full flex flex-col shadow-[inset_0_0_15px_rgba(0,0,0,0.8)]">
+                        <div class="flex justify-between items-end border-b border-amber-800 pb-1 mb-2">
+                            <div class="text-amber-300 text-xs">■ RACE CARD</div>
+                            <div class="text-[10px] text-amber-400 bg-black px-2 py-0.5 rounded border border-amber-800 shadow-inner">対象券種: <span class="font-bold text-yellow-400">${state.selectedBetType}</span></div>
+                        </div>
+                        <div class="flex text-[10px] text-amber-600/80 mb-1 px-1">
+                            <div class="w-6 text-center">番</div><div class="w-4 text-center">印</div><div class="flex-1 ml-2">馬名</div><div class="w-8 text-center">脚質</div><div class="w-12 text-center">調子</div><div class="w-12 text-right">単オッズ</div>
+                        </div>
+                        <div class="flex-1 flex flex-col gap-1 hide-scrollbar" style="overflow-y: auto; max-height: 400px;">
+                            ${horseRows}
+                        </div>
+                    </div>
+                </div>
+                <div class="w-full md:w-1/4 flex flex-col gap-2">
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 flex-1 flex flex-col">
+                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1">■ YOUR TICKET</div>
+                        <div class="flex-1 overflow-y-auto max-h-40 md:max-h-[300px] bg-black border border-amber-900/50 p-1 shadow-inner hide-scrollbar">${betList}</div>
+                        <div class="mt-2 text-right text-xs text-yellow-400 font-bold border-t border-amber-800 pt-2 drop-shadow-sm">TOTAL BET: <span class="text-lg">${state.bets.reduce((sum, b) => sum + b.amount, 0).toLocaleString()}</span> 円</div>
+                    </div>
+                    ${startButtonHtml}
+                </div>
+            </div>
+            `;
+        }
+
+        function getRaceHTML() {
+            const horsesDOM = state.horses.map((h, i) => `
+                <div id="horse-dom-${h.no}" class="absolute flex items-end transition-transform duration-75 ease-linear" style="top: calc(${i * 12 + 2}%); left: 0%; transform: translateX(-50%);">
+                    <div class="w-6 h-6 rounded border ${h.waku.bg} ${h.waku.text} ${h.waku.border} text-xs flex items-center justify-center mb-1 mr-1 font-bold z-20 shadow-md">${h.no}</div>
+                    <div id="horse-emoji-${h.no}" class="text-5xl filter drop-shadow-xl z-10 relative transform -scale-x-100"><span class="absolute top-0 right-0 text-xs transform scale-x-100"></span>🏇</div>
+                    <div id="horse-dust-${h.no}" class="absolute -left-4 bottom-0 text-2xl opacity-60" style="display:none;">💨</div>
+                </div>
+            `).join('');
+            return `
+            <div id="race-container" class="border-2 border-amber-800 bg-[#1a472a] relative overflow-hidden shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]" style="height: 450px;">
+                <div class="absolute top-0 left-0 w-full h-full pointer-events-none" style="background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px)"></div>
+                <div class="absolute top-0 left-0 w-full h-full pointer-events-none">
+                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 21.25%"></div><div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 42.5%"></div><div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 63.75%"></div>
+                    <div class="absolute top-0 h-full border-l-4 border-red-600 shadow-[0_0_10px_rgba(220,38,38,0.8)]" style="left: 85%"></div>
+                </div>
+                ${horsesDOM}
+                <div class="absolute bottom-3 right-3 z-30">
+                    ${(state.mode === 'single' || state.mode === 'hardcore') ? `<button onclick="skipRace()" class="bg-gray-900 text-amber-500 text-xs px-3 py-1.5 rounded-sm border border-amber-700 hover:bg-gray-800 transition-colors shadow-lg">SKIP ⏩</button>` : ''}
+                </div>
+            </div>
+            `;
+        }
+
+        function getResultHTML() {
+            const resultRows = state.raceResult.map((h, i) => `
+                <li class="flex items-center text-lg border-b border-amber-900/50 pb-2">
+                    <span class="w-10 text-center font-bold mr-4 ${i === 0 ? 'text-yellow-400 text-2xl drop-shadow-md' : i === 1 ? 'text-gray-300' : i === 2 ? 'text-amber-600' : 'text-amber-800/50'}">${i + 1}着</span>
+                    <span class="w-8 h-8 rounded border ${h.waku.bg} ${h.waku.text} ${h.waku.border} flex items-center justify-center mr-4 font-bold shadow-sm">${h.no}</span>
+                    <span class="${i === 0 ? 'text-white font-bold' : 'text-gray-300'}">${h.name}</span>
+                </li>
+            `).join('');
+
+            const betResults = state.bets.length === 0 ? `<p class="text-amber-800/50 text-center mt-4 text-xs">NO ENTRY</p>` : `<ul class="space-y-2">` + state.bets.map((bet) => {
+                const isHit = bet.isHit; 
+                const hitClass = isHit ? 'bg-amber-900/30 border-yellow-500 shadow-[0_0_5px_rgba(234,179,8,0.5)]' : 'bg-gray-900 border-gray-800';
+                const hitText = isHit === undefined ? '判定中...' : (isHit ? '🎯 WIN' : 'LOSE');
+                const hitColor = isHit ? 'text-yellow-400 text-lg drop-shadow-sm' : 'text-gray-600 text-xs';
+                return `
+                    <li class="flex justify-between items-center p-2 border ${hitClass}">
+                        <div class="flex flex-col">
+                            <span class="text-amber-600/80 text-[10px]">[${bet.type}]</span>
+                            <span class="text-white font-bold">${bet.horses.join(' - ')}</span>
+                        </div>
+                        <span class="font-bold ${hitColor}">${hitText}</span>
+                    </li>
+                `;
+            }).join('') + `</ul>`;
+
+            let nextButtonHtml = '';
+            if (state.isDead) {
+                nextButtonHtml = `<div class="p-3 border border-red-700 bg-red-950 rounded text-red-400 font-bold text-sm">アカウントBANされました</div>`;
+            } else if (state.mode === 'multi') {
+                if (isHost) {
+                    nextButtonHtml = `
+                        <button onclick="nextMultiRace()" class="bg-gradient-to-b from-blue-600 to-blue-900 hover:from-blue-500 hover:to-blue-800 text-white font-bold py-3 px-8 rounded-sm border-b-4 border-blue-950 active:border-b-0 active:mt-1 w-full tracking-widest shadow-md">
+                            NEXT RACE ▶
+                        </button>
+                    `;
+                } else {
+                    nextButtonHtml = `
+                        <div class="p-3 border border-gray-700 bg-gray-800 rounded text-amber-400 font-bold text-sm animate-pulse">
+                            ホストが次のレースを開始するのを待っています...
+                        </div>
+                    `;
+                }
+            } else {
+                nextButtonHtml = `
+                    <button onclick="nextRace()" class="bg-gradient-to-b from-blue-600 to-blue-900 hover:from-blue-500 hover:to-blue-800 text-white font-bold py-3 px-8 rounded-sm border-b-4 border-blue-950 active:border-b-0 active:mt-1 w-full tracking-widest shadow-md">
+                        NEXT RACE ▶
+                    </button>
+                `;
+            }
+
+            return `
+            <div class="space-y-2">
+                <div class="bg-amber-600 text-black font-bold px-3 py-1 inline-block mb-2 shadow-[0_0_5px_rgba(217,119,6,0.8)]">🏆 RACE RESULT</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="border-2 border-amber-800 p-4 bg-gray-900 shadow-inner">
+                        <ul class="space-y-3">${resultRows}</ul>
+                    </div>
+                    <div class="border-2 border-amber-800 p-4 flex flex-col bg-gray-900 shadow-inner">
+                        <h3 class="text-amber-300 text-sm mb-2 border-b border-amber-800 pb-1">■ YOUR TICKET</h3>
+                        <div class="flex-1 overflow-y-auto max-h-64 bg-black border border-amber-900/50 p-2 hide-scrollbar">${betResults}</div>
+                        <div class="mt-4 text-center">
+                            ${nextButtonHtml}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+        }
+
+        // --- ゲーム開始 ---
+        window.onload = () => {
+            window.render(); 
+        };
+
+    </script>
+</body>
+</html>
