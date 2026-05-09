@@ -108,7 +108,7 @@
         let roomData = null;
         let tempPlayerName = "";
 
-        // ★同一ブラウザの複数タブでも別人と認識させるためのセッションID
+        // 同一ブラウザの複数タブでも別人と認識させるためのセッションID
         const localSessionId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
 
         let isInitialAuthCheck = true;
@@ -116,7 +116,7 @@
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             if (isInitialAuthCheck && user && !user.isAnonymous) {
-                state.loginSelected = true; // すでにGoogleログイン済みなら選択画面スキップ
+                state.loginSelected = true; 
             }
             isInitialAuthCheck = false;
             
@@ -161,7 +161,7 @@
         window.logoutGoogle = async () => {
             try {
                 await signOut(auth);
-                state.loginSelected = false; // ログアウトしたらログイン選択画面に戻す
+                state.loginSelected = false; 
                 window.executeGoToTitle();
             } catch(e) {
                 console.error("Logout failed", e);
@@ -213,7 +213,8 @@
                 speed: 75,   
                 stamina: 70, 
                 guts: 65,    
-                lastRaceResult: '新馬'
+                lastRaceResult: '新馬',
+                lifespan: randomInt(12, 18) // ★初期馬の寿命（12〜18戦）
             };
         };
 
@@ -242,7 +243,7 @@
                 const shuffledMyHorses = [...poolToUse].sort(() => Math.random() - 0.5);
                 let count = 0;
                 shuffledMyHorses.forEach(myHorse => {
-                    // ★確率UP: 90%の確率で出現 (最大3頭まで)
+                    // 確率UP: 90%の確率で出現 (最大3頭まで)
                     if (Math.random() < 0.90 && participatingMyHorses.length < 8 && count < 3) {
                         participatingMyHorses.push(myHorse);
                         count++;
@@ -337,7 +338,7 @@
 
         // --- グローバル状態 ---
         const state = {
-            loginSelected: false, // ★ログイン選択状態
+            loginSelected: false, 
             mode: 'single', 
             hardcoreId: null, 
             phase: 'title',
@@ -432,7 +433,7 @@
                 r: state.raceCount,
                 b: state.multiBonusLevel || 1, 
                 h: state.myHorses.map(h => ({
-                    n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult
+                    n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult, ls: h.lifespan // ★寿命を保存
                 }))
             };
             const jsonStr = JSON.stringify(saveData);
@@ -460,6 +461,7 @@
                 state.multiBonusLevel = data.b || 1; 
                 state.myHorses = data.h.map((h, i) => ({
                     name: h.n, type: h.t, speed: h.s, stamina: h.st, guts: h.g, lastRaceResult: h.l,
+                    lifespan: h.ls !== undefined ? h.ls : 15, // ★寿命を復元（過去セーブ用フォールバック付）
                     id: 1000 + i
                 }));
                 return true;
@@ -497,8 +499,8 @@
                 <div class="text-xs md:text-sm text-gray-300 mb-4 h-64 overflow-y-auto space-y-3 border border-amber-900 p-3 bg-black rounded shadow-inner hide-scrollbar">
                     <p><strong class="text-white">【基本ルール】</strong><br>所持金を使って馬券を買い、レースで資金を増やしましょう。所持金が0になり、売却できる馬もいないとゲームオーバーになります。</p>
                     <p><strong class="text-white">【ハードコアモード】</strong><br>ひとりで遊ぶの高難易度モードです。馬券が的中すれば配当は常に1万倍ですが、一度でもハズレると全財産と愛馬が没収されます。</p>
-                    <p><strong class="text-white">【マイホースの育成】</strong><br>資金が貯まると、自分だけの馬を購入し育成できます。調教メニューを選んでステータスを上げましょう。</p>
-                    <p><strong class="text-white">【マイホースの出走】</strong><br>育成したマイホースは、高確率（90%）で通常のレースに乱入出走します。出走して3着以内に入ると賞金がもらえます。</p>
+                    <p><strong class="text-white">【マイホースの育成】</strong><br>資金が貯まると、最大6頭まで自分だけの馬を購入し育成できます。調教メニューを選んでステータスを上げましょう。</p>
+                    <p><strong class="text-white">【マイホースの出走と寿命】</strong><br>育成したマイホースは、高確率（90%）で通常のレースに乱入出走します。ただし、レースをこなすたびに寿命が減り、0になると引退してしまいます。</p>
                     <p><strong class="text-white">【みんなで遊ぶ (マルチプレイ)】</strong><br>友達と部屋を作って対戦できます。ホストやゲストが育てた馬もオンラインのレースに参戦します！</p>
                     <p><strong class="text-white">【ショップ】</strong><br>タイトル画面のショップで稼いだお金を払うと、マルチプレイ開始時の初期資金倍率をアップグレードできます。</p>
                 </div>
@@ -610,6 +612,22 @@
             window.showShopModal(); 
         };
 
+        window.copySaveCode = () => {
+            const textarea = document.getElementById('save-code-textarea');
+            textarea.select();
+            document.execCommand('copy');
+            const btn = document.getElementById('copy-btn');
+            const origText = btn.innerText;
+            btn.innerText = "✓ コピー完了！";
+            btn.classList.replace('bg-gray-800', 'bg-green-600');
+            btn.classList.replace('text-amber-500', 'text-white');
+            setTimeout(() => {
+                btn.innerText = origText;
+                btn.classList.replace('bg-green-600', 'bg-gray-800');
+                btn.classList.replace('text-white', 'text-amber-500');
+            }, 2000);
+        };
+
         window.showSaveModal = () => {
             if(state.mode === 'multi') return;
             const code = window.generateSaveData();
@@ -634,7 +652,10 @@
             window.openModal(`
                 <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">💾 ふっかつのじゅもん</h3>
                 <p class="text-sm text-gray-300 mb-2">文字列を保存しておけば続きから遊べます。</p>
-                <textarea readonly class="w-full bg-black border border-amber-700 text-amber-500 p-2 rounded mb-2 h-20 font-mono text-xs focus:outline-none" onclick="this.select()">${code}</textarea>
+                <div class="relative">
+                    <textarea id="save-code-textarea" readonly class="w-full bg-black border border-amber-700 text-amber-500 p-2 rounded mb-2 h-20 font-mono text-xs focus:outline-none" onclick="this.select()">${code}</textarea>
+                    <button id="copy-btn" onclick="copySaveCode()" class="absolute top-2 right-2 bg-gray-800 hover:bg-gray-700 text-amber-500 text-[10px] px-2 py-1 rounded border border-gray-600 transition-colors shadow-md">📋 コピー</button>
+                </div>
                 ${cloudSaveHtml}
                 <div class="text-center mt-4">
                     <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
@@ -680,7 +701,7 @@
                     r: state.raceCount,
                     b: state.multiBonusLevel || 1, 
                     h: state.myHorses.map(h => ({
-                        n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult
+                        n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult, ls: h.lifespan // ★寿命を保存
                     }))
                 };
                 const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'retro_derby_saves', 'data');
@@ -713,6 +734,7 @@
                     state.multiBonusLevel = data.b || 1; 
                     state.myHorses = data.h.map((h, i) => ({
                         name: h.n, type: h.t, speed: h.s, stamina: h.st, guts: h.g, lastRaceResult: h.l,
+                        lifespan: h.ls !== undefined ? h.ls : 15, // ★寿命を復元
                         id: 1000 + i
                     }));
                     
@@ -1174,6 +1196,12 @@
         };
 
         window.buyHorse = () => {
+            // ★上限数(6頭)のチェック
+            if (state.myHorses.length >= 6) {
+                window.setMessage(`厩舎が満員です。最大6頭までしか所有できません。（馬を売却するか、寿命を迎えるまでお待ちください）`);
+                return;
+            }
+
             const cost = 50000 * (state.myHorses.length + 1);
             if (state.money < cost) {
                 window.setMessage(`馬の購入には ${cost.toLocaleString()} 円必要です。レースで資金を増やしましょう！`);
@@ -1201,7 +1229,8 @@
                 speed: 45, 
                 stamina: 45, 
                 guts: 45, 
-                lastRaceResult: '新馬'
+                lastRaceResult: '新馬',
+                lifespan: randomInt(15, 22) // ★購入馬の寿命（15〜22戦）
             };
             state.training = { turn: 10, hp: 100, maxHp: 100 };
             state.phase = 'training';
@@ -1536,11 +1565,6 @@
                         }
                     }
                 });
-                if (currentRoomId && currentUser) {
-                     updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
-                        [`players.${localSessionId}.myHorses`]: state.myHorses
-                    }).catch(e => console.error(e));
-                }
             }
 
             window.render(); 
@@ -1611,13 +1635,28 @@
                 }
             });
 
+            // ★ハードコアモードの死亡判定
             if (state.mode === 'hardcore' && state.bets.length > 0) {
                 const hasHit = state.bets.some(b => b.isHit);
                 if (!hasHit) {
                     state.money = 0;
                     state.myHorses = [];
                     state.multiBonusLevel = 1;
+                    state.isDead = true;
+                    localStorage.setItem('retro_derby_hardcore_dead', 'true');
                     
+                    if (state.hardcoreId) {
+                        const deadIdsStr = localStorage.getItem('dead_hardcore_ids') || '[]';
+                        const deadIds = JSON.parse(deadIdsStr);
+                        if (!deadIds.includes(state.hardcoreId)) {
+                            deadIds.push(state.hardcoreId);
+                            localStorage.setItem('dead_hardcore_ids', JSON.stringify(deadIds));
+                        }
+                        try {
+                            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_dead_ids', state.hardcoreId), { dead: true, timestamp: Date.now() });
+                        } catch(e) {}
+                    }
+
                     window.setMessage(`☠️ ハズレ... 全財産と愛馬を没収されました。`);
                     window.render();
                     
@@ -1634,14 +1673,43 @@
                 }
             }
 
+            // ★寿命システム (生存している場合)
+            let retiredHorses = [];
+            let survivingHorses = [];
+            if (!state.isDead) {
+                state.myHorses.forEach(h => {
+                    h.lifespan -= 1;
+                    if (h.lifespan <= 0) {
+                        retiredHorses.push(h.name);
+                    } else {
+                        survivingHorses.push(h);
+                    }
+                });
+                state.myHorses = survivingHorses;
+
+                if (state.mode === 'multi' && currentRoomId && currentUser) {
+                    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
+                        [`players.${localSessionId}.myHorses`]: state.myHorses
+                    }).catch(e => console.error(e));
+                }
+            }
+
+            // ★結果メッセージ生成
+            let finalMsg = "";
             if (totalPayout > 0) {
-                window.setMessage(`的中！ 払い戻し・賞金合計 ${totalPayout.toLocaleString()} 円 です！${prizeMsg}`);
+                finalMsg = `的中！ 払い戻し・賞金合計 ${totalPayout.toLocaleString()} 円 です！${prizeMsg}`;
                 window.syncMoney(state.money + totalPayout);
             } else if (state.bets.length > 0) {
-                window.setMessage(`ハズレ... 次のレースに期待しましょう。${prizeMsg}`);
+                finalMsg = `ハズレ... 次のレースに期待しましょう。${prizeMsg}`;
             } else {
-                window.setMessage(`馬券を買っていませんでしたね。${prizeMsg}`);
+                finalMsg = `馬券を買っていませんでしたね。${prizeMsg}`;
             }
+
+            if (retiredHorses.length > 0 && !state.isDead) {
+                finalMsg += ` 【悲報】${retiredHorses.join('、')} が寿命を迎え引退しました...`;
+            }
+
+            window.setMessage(finalMsg);
             window.render(); 
         };
 
@@ -1915,7 +1983,7 @@
                                 <p class="text-[10px] text-white font-bold">${h.name} <span class="text-yellow-400">(${h.type})</span></p>
                                 <button onclick="showSellModal(${targetId})" class="bg-red-800 hover:bg-red-700 text-white text-[9px] px-2 py-0.5 rounded border border-red-600 transition-colors">売却</button>
                             </div>
-                            <p class="text-[9px] text-amber-500">ｽﾋﾟ:${h.speed} ｽﾀ:${h.stamina} 根性:${h.guts} | 前走:${h.lastRaceResult}</p>
+                            <p class="text-[9px] text-amber-500">ｽﾋﾟ:${h.speed} ｽﾀ:${h.stamina} 根性:${h.guts} | 寿命:残り${h.lifespan !== undefined ? h.lifespan : '?'}戦 | 前走:${h.lastRaceResult}</p>
                         </div>
                     `}).join('');
                 } else {
@@ -1924,7 +1992,10 @@
 
                 ownerMenu = `
                     <div class="border-2 border-amber-800 bg-gray-900 p-2 mt-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)] flex flex-col max-h-48">
-                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1 shrink-0">■ OWNER MENU</div>
+                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1 shrink-0 flex justify-between">
+                            <span>■ OWNER MENU</span>
+                            <span class="text-yellow-500">${state.myHorses.length} / 6頭</span>
+                        </div>
                         <div class="overflow-y-auto hide-scrollbar mb-2 flex-1">
                             ${myHorseList}
                         </div>
