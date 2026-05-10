@@ -566,10 +566,11 @@
                 <div class="text-xs md:text-sm text-gray-300 mb-4 h-64 overflow-y-auto space-y-3 border border-amber-900 p-3 bg-black rounded shadow-inner hide-scrollbar">
                     <p><strong class="text-white">【基本ルール】</strong><br>所持金を使って馬券を買い、レースで資金を増やしましょう。所持金が0になり、売却できる馬もいないとゲームオーバーになります。</p>
                     <p><strong class="text-white">【コースと距離】</strong><br>レースごとにコースや距離（1200m〜3200m）が変わります。距離が長いほどスタミナを消耗しやすくなります。</p>
-                    <p><strong class="text-white">【ハードコアモード】</strong><br>ひとりで遊ぶの高難易度モードです。馬券が的中すれば配当は常に1万倍ですが、一度でもハズレると全財産と愛馬が没収されます。</p>
+                    <p><strong class="text-white">【ハードコアモード】</strong><br>ひとりで遊ぶの高難易度モードです。馬券が的中すれば配当は常に1万倍ですが、<span class="text-red-400 font-bold">馬券は1レースにつき1枚しか買えません</span>。一度でもハズレると全財産と愛馬が没収されます。</p>
                     <p><strong class="text-white">【マイホースの育成】</strong><br>資金が貯まると、最大6頭まで自分だけの馬を購入し育成できます。調教メニューを選んでステータスを上げましょう。</p>
                     <p><strong class="text-white">【マイホースの出走と寿命】</strong><br>育成したマイホースは、高確率（90%）で通常のレースに乱入出走します。ただし、レースをこなすたびに寿命が減り、0になると引退してしまいます。</p>
                     <p><strong class="text-white">【みんなで遊ぶ (マルチプレイ)】</strong><br>友達と部屋を作って対戦できます。ホストやゲストが育てた馬もオンラインのレースに参戦します！</p>
+                    <p><strong class="text-white">【ショップ・名前変更・ランキング】</strong><br>稼いだお金を使って初期資金倍率をアップグレードしたり、名前を変更したりできます。所持金ランキングでトップを目指しましょう。</p>
                 </div>
                 <div class="text-center">
                     <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
@@ -1489,6 +1490,12 @@
         };
 
         window.addBet = () => {
+            // ★ ハードコアモードでの馬券枚数制限
+            if (state.mode === 'hardcore' && state.bets.length >= 1) {
+                window.setMessage("☠️ ハードコアモードでは馬券は1枚しか買えません！");
+                return;
+            }
+
             let requiredSelections = 1;
             if (["馬連", "馬単", "枠連", "ワイド"].includes(state.selectedBetType)) requiredSelections = 2;
             if (["3連複", "3連単"].includes(state.selectedBetType)) requiredSelections = 3;
