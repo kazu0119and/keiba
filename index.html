@@ -13,16 +13,6 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* 疾走感を出す背景スクロールアニメーション */
-        @keyframes scrollBg {
-            0% { background-position: 0 0; }
-            100% { background-position: -100px 0; }
-        }
-        .bg-scroll {
-            background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px);
-            animation: scrollBg 0.4s linear infinite;
-        }
-        
         /* 砂埃のアニメーション */
         @keyframes dustFly {
             0% { transform: translate(0, 0) scale(0.8); opacity: 0.8; }
@@ -138,7 +128,6 @@
                 const result = await signInWithPopup(auth, provider);
                 if (result.user) {
                     await window.executeCloudLoad();
-                    // クラウドに名前がなかった場合はGoogleアカウントの名前を使用
                     if (!state.playerName || state.playerName.startsWith("ゲスト")) {
                         state.playerName = result.user.displayName || "プレイヤー";
                     }
@@ -217,7 +206,17 @@
             { bg: 'bg-pink-400', text: 'text-black', border: 'border-pink-600' }
         ];
 
-        // --- アップグレードデータ ---
+        // ★コースデータ追加
+        const COURSES = [
+            { name: "東京", distance: 2400, type: "芝", color: "bg-[#1a472a]" },
+            { name: "中山", distance: 2000, type: "芝", color: "bg-[#2d5a27]" },
+            { name: "阪神", distance: 2200, type: "芝", color: "bg-[#1f4e20]" },
+            { name: "大井", distance: 2000, type: "ダート", color: "bg-[#8b5a2b]" },
+            { name: "京都", distance: 3200, type: "芝", color: "bg-[#224419]" },
+            { name: "札幌", distance: 1200, type: "芝", color: "bg-[#345c2d]" },
+            { name: "川崎", distance: 1600, type: "ダート", color: "bg-[#9a6a3b]" }
+        ];
+
         const MULTI_BONUS_UPGRADES = [
             { level: 1, rate: 1.0, cost: 0 },
             { level: 2, rate: 1.1, cost: 100000 },
@@ -272,7 +271,6 @@
                 const shuffledMyHorses = [...poolToUse].sort(() => Math.random() - 0.5);
                 let count = 0;
                 shuffledMyHorses.forEach(myHorse => {
-                    // ★確率UP: 90%の確率で出現 (最大3頭まで)
                     if (Math.random() < 0.90 && participatingMyHorses.length < 8 && count < 3) {
                         participatingMyHorses.push(myHorse);
                         count++;
@@ -368,11 +366,12 @@
         // --- グローバル状態 ---
         const state = {
             loginSelected: false, 
-            playerName: "", // 初期値は空（ログイン・ゲスト選択時に設定）
+            playerName: "", 
             mode: 'single', 
             hardcoreId: null, 
             phase: 'title',
             horses: [],
+            currentCourse: COURSES[0], // ★コース情報の追加
             raceCount: 1,
             money: 10000,
             multiBonusLevel: 1, 
@@ -392,7 +391,6 @@
             isDead: false 
         };
 
-        // --- ランキング同期機能 ---
         window.updateRanking = async () => {
             try {
                 if (!state.playerName || state.money <= 0) return;
@@ -407,7 +405,6 @@
             }
         };
 
-        // --- 所持金の同期機能 ---
         window.syncMoney = (newMoney) => {
             state.money = newMoney;
             window.updateHeader();
@@ -416,10 +413,9 @@
                     [`players.${localSessionId}.money`]: newMoney
                 }).catch(e => console.error("Money sync error:", e));
             }
-            window.updateRanking(); // 所持金が変動するたびにランキングを更新
+            window.updateRanking(); 
         };
 
-        // --- BET金額の更新 ---
         window.updateBetAmount = (val) => {
             if (val === "") {
                 state.betAmount = "";
@@ -436,9 +432,10 @@
             window.render();
         };
 
-        // --- UI更新関数 ---
         window.updateHeader = function() {
-            document.getElementById('header-race-count').innerText = `RACE ${state.raceCount}`;
+            // ★ヘッダーにコース情報を追加表示
+            const courseInfo = state.currentCourse ? `<span class="ml-1 md:ml-3 text-yellow-500 font-normal">[${state.currentCourse.name} ${state.currentCourse.type}${state.currentCourse.distance}m]</span>` : '';
+            document.getElementById('header-race-count').innerHTML = `RACE ${state.raceCount} ${courseInfo}`;
             document.getElementById('header-money').innerText = state.money.toLocaleString();
 
             const indicator = document.getElementById('header-mode-indicator');
@@ -475,7 +472,6 @@
             if(mb) mb.innerText = msg;
         };
 
-        // --- セーブ＆ロード ---
         window.generateSaveData = function() {
             const saveData = {
                 md: state.mode,
@@ -483,7 +479,7 @@
                 m: state.money,
                 r: state.raceCount,
                 b: state.multiBonusLevel || 1, 
-                pn: state.playerName, // プレイヤー名を保存
+                pn: state.playerName, 
                 h: state.myHorses.map(h => ({
                     n: h.name, t: h.type, s: h.speed, st: h.stamina, g: h.guts, l: h.lastRaceResult, ls: h.lifespan, on: h.ownerName
                 }))
@@ -553,11 +549,11 @@
                 <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">📖 遊び方</h3>
                 <div class="text-xs md:text-sm text-gray-300 mb-4 h-64 overflow-y-auto space-y-3 border border-amber-900 p-3 bg-black rounded shadow-inner hide-scrollbar">
                     <p><strong class="text-white">【基本ルール】</strong><br>所持金を使って馬券を買い、レースで資金を増やしましょう。所持金が0になり、売却できる馬もいないとゲームオーバーになります。</p>
+                    <p><strong class="text-white">【コースと距離】</strong><br>レースごとにコースや距離（1200m〜3200m）が変わります。距離が長いほどスタミナを消耗しやすくなります。</p>
                     <p><strong class="text-white">【ハードコアモード】</strong><br>ひとりで遊ぶの高難易度モードです。馬券が的中すれば配当は常に1万倍ですが、一度でもハズレると全財産と愛馬が没収されます。</p>
                     <p><strong class="text-white">【マイホースの育成】</strong><br>資金が貯まると、最大6頭まで自分だけの馬を購入し育成できます。調教メニューを選んでステータスを上げましょう。</p>
                     <p><strong class="text-white">【マイホースの出走と寿命】</strong><br>育成したマイホースは、高確率（90%）で通常のレースに乱入出走します。ただし、レースをこなすたびに寿命が減り、0になると引退してしまいます。</p>
                     <p><strong class="text-white">【みんなで遊ぶ (マルチプレイ)】</strong><br>友達と部屋を作って対戦できます。ホストやゲストが育てた馬もオンラインのレースに参戦します！</p>
-                    <p><strong class="text-white">【ショップ・名前変更・ランキング】</strong><br>稼いだお金を使って初期資金倍率をアップグレードしたり、名前を変更したりできます。所持金ランキングでトップを目指しましょう。</p>
                 </div>
                 <div class="text-center">
                     <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
@@ -668,7 +664,6 @@
             window.showShopModal(); 
         };
 
-        // ★ 名前変更機能
         window.showRenameModal = () => {
             window.openModal(`
                 <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">📛 名前変更</h3>
@@ -714,7 +709,6 @@
             window.render();
         };
 
-        // ★ ランキング機能
         window.showRankingModal = async () => {
             window.openModal(`
                 <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">🏆 所持金ランキング</h3>
@@ -886,7 +880,7 @@
                 const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'retro_derby_saves', 'data');
                 await setDoc(docRef, { data: JSON.stringify(saveData), updatedAt: Date.now() });
                 
-                window.updateRanking(); // セーブ時にもランキング更新
+                window.updateRanking();
                 window.closeModal();
                 window.setMessage("☁️ クラウドにセーブしました！");
                 window.render();
@@ -1043,6 +1037,7 @@
             state.trainingHorse = null;
             state.multiBonusLevel = 1; 
             
+            state.currentCourse = COURSES[randomInt(0, COURSES.length - 1)]; // ★コースのランダム決定
             state.horses = generateHorses(true);
             state.phase = 'betting';
 
@@ -1125,11 +1120,15 @@
             
             const initialMoneyInfo = window.getMultiplayerInitialMoney();
             const initialMoney = initialMoneyInfo.money;
+            
+            const nextCourse = COURSES[randomInt(0, COURSES.length - 1)]; // ★コースの決定
+            state.currentCourse = nextCourse;
 
             const initialRoomData = {
                 hostUid: localSessionId, 
                 phase: 'lobby',
                 raceCount: 1,
+                course: nextCourse, // ★コースの同期
                 horses: newHorses,
                 players: {
                     [localSessionId]: { name: nameToUse, ready: false, money: initialMoney, myHorses: state.myHorses }
@@ -1193,6 +1192,8 @@
                 listenRoom(roomId);
                 
                 const data = snapshot.data();
+                if (data.course) state.currentCourse = data.course; // ★コースの受け取り
+
                 if (data.phase === 'betting') {
                     state.phase = 'betting';
                     state.raceCount = data.raceCount;
@@ -1226,6 +1227,7 @@
                 
                 state.raceCount = data.raceCount;
                 state.horses = data.horses;
+                if (data.course) state.currentCourse = data.course; // ★コースの同期
                 
                 if (data.phase === 'betting' && oldPhase !== 'betting') {
                     state.phase = 'betting';
@@ -1312,10 +1314,12 @@
                 }
             });
             const newHorses = generateHorses(false, pool); 
-            
+            const nextCourse = COURSES[randomInt(0, COURSES.length - 1)]; // ★次のコース
+
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'retro_derby_rooms', currentRoomId), {
                 phase: 'betting',
                 raceCount: nextCount,
+                course: nextCourse,
                 horses: newHorses,
                 players: updatedPlayers
             });
@@ -1364,6 +1368,7 @@
             }
             state.bets = [];
             state.raceCount++;
+            state.currentCourse = COURSES[randomInt(0, COURSES.length - 1)]; // ★次コース決定
             state.horses = generateHorses(true);
             state.phase = 'betting';
             
@@ -1552,8 +1557,18 @@
         window.startRaceAnimation = function() {
             state.horsesRef = state.horses.map(h => ({ ...h, x: 0, currentSpeed: 0, currentStamina: h.stamina, hasFinished: false }));
             let tick = 0;
-            const raceLength = 1000;
+            
+            // ★コース情報の取得
+            const raceLength = state.currentCourse ? state.currentCourse.distance : 1000;
+            const staminaDrainRate = 1000 / raceLength; // 距離によるスタミナ消費調整
+            const trackWidthRatio = 4; // 画面幅の4倍をコース全長とする
+            const goalRatio = 0.95; // 95%地点をゴールとする
+            
             state.lastProg = 0; 
+            
+            const viewport = document.getElementById('race-container');
+            const track = document.getElementById('race-track');
+            const distLeftEl = document.getElementById('distance-left');
 
             const animate = () => {
                 tick++;
@@ -1570,7 +1585,7 @@
                         
                         const horseEl = document.getElementById(`horse-dom-${h.no}`);
                         if (horseEl) {
-                            horseEl.style.left = `${(h.x / 1000) * 85}%`;
+                            horseEl.style.left = `${(h.x / raceLength) * (goalRatio * 100)}%`;
                             horseEl.style.top = `calc(${index * 12 + 2}% + ${h.yOffset}px)`;
                         }
                         return;
@@ -1605,7 +1620,8 @@
                         if (h.type === '追込') targetSpeed *= 0.85;
                     } else {
                         if (h.currentStamina > 0) {
-                            h.currentStamina -= (0.4 - h.guts / 400); 
+                            // ★距離に応じたスタミナ消費
+                            h.currentStamina -= (0.4 - h.guts / 400) * staminaDrainRate; 
                             if (h.type === '追込') targetSpeed *= 1.7;
                             if (h.type === '差し') targetSpeed *= 1.4;
                             if (h.type === '先行') targetSpeed *= 1.1;
@@ -1633,7 +1649,7 @@
 
                     const horseEl = document.getElementById(`horse-dom-${h.no}`);
                     if (horseEl) {
-                        horseEl.style.left = `${(h.x / 1000) * 85}%`;
+                        horseEl.style.left = `${(h.x / raceLength) * (goalRatio * 100)}%`;
                         horseEl.style.top = `calc(${index * 12 + 2}% + ${h.yOffset}px)`;
                         const delayStr = (h.isDelayed && h.x < 100) ? '💦' : '';
                         document.getElementById(`horse-emoji-${h.no}`).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100">${delayStr}</span>🏇`;
@@ -1647,6 +1663,29 @@
                         }
                     }
                 });
+                
+                // ★ ミニマップ（残り距離）の更新
+                if (distLeftEl) {
+                    const remain = Math.max(0, raceLength - currentTopX);
+                    distLeftEl.innerText = Math.floor(remain);
+                }
+
+                // ★ カメラ追従ロジック
+                if (viewport && track) {
+                    const viewportWidth = viewport.offsetWidth;
+                    const fullTrackWidth = viewportWidth * trackWidthRatio;
+                    
+                    // 先頭馬のピクセル位置
+                    const topHorsePx = (currentTopX / raceLength) * (fullTrackWidth * goalRatio);
+
+                    // 画面の右寄り(70%)に先頭馬を置く
+                    let cameraX = topHorsePx - (viewportWidth * 0.7);
+                    if (cameraX < 0) cameraX = 0;
+                    const maxCameraX = fullTrackWidth - viewportWidth;
+                    if (cameraX > maxCameraX) cameraX = maxCameraX;
+
+                    track.style.transform = `translateX(-${cameraX}px)`;
+                }
 
                 const progInt = Math.min(100, Math.floor((currentTopX / raceLength) * 100));
                 const sortedHorses = [...state.horsesRef].filter(h => !h.isRetired).sort((a, b) => b.x - a.x);
@@ -1685,8 +1724,6 @@
                 }
 
                 if (allFinished) {
-                    const bg = document.getElementById('race-bg');
-                    if(bg) bg.style.animationPlayState = 'paused';
                     window.finishRaceLocal();
                 } else {
                     state.animationRef = requestAnimationFrame(animate);
@@ -1699,7 +1736,9 @@
         window.skipRace = () => {
             cancelAnimationFrame(state.animationRef);
             let safetyCounter = 0;
-            while(state.horsesRef.some(h => !h.hasFinished && !h.isRetired) && safetyCounter < 1000) {
+            const raceLength = state.currentCourse ? state.currentCourse.distance : 1000;
+            
+            while(state.horsesRef.some(h => !h.hasFinished && !h.isRetired) && safetyCounter < 5000) {
                 state.horsesRef.forEach(h => {
                     if(!h.hasFinished && !h.isRetired) {
                         if (h.isAccident) {
@@ -1709,9 +1748,9 @@
                             const prevX = h.x;
                             const speed = h.speed / 5;
                             h.x += speed;
-                            if (h.x >= 1000) {
+                            if (h.x >= raceLength) {
                                 h.hasFinished = true;
-                                h.finishTick = safetyCounter - 1 + (1000 - prevX) / speed + (h.randomFactor * 0.01);
+                                h.finishTick = safetyCounter - 1 + (raceLength - prevX) / speed + (h.randomFactor * 0.01);
                             }
                         }
                     }
@@ -2372,15 +2411,34 @@
                     <div id="horse-dust-${h.no}" class="absolute -left-4 bottom-0 text-2xl opacity-60" style="display:none;">💨</div>
                 </div>
             `).join('');
+
+            const courseColor = state.currentCourse ? state.currentCourse.color : 'bg-[#1a472a]';
+            const isDirt = state.currentCourse && state.currentCourse.type === 'ダート';
+            
+            let trackBgStyle = 'repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px)';
+            if (isDirt) {
+                trackBgStyle = 'repeating-linear-gradient(90deg, rgba(0,0,0,0.05) 0px, rgba(0,0,0,0.05) 10px, transparent 10px, transparent 20px)';
+            }
+
             return `
-            <div id="race-container" class="border-2 border-amber-800 bg-[#1a472a] relative overflow-hidden shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]" style="height: 450px;">
-                <div class="absolute top-0 left-0 w-full h-full pointer-events-none" style="background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px)"></div>
-                <div class="absolute top-0 left-0 w-full h-full pointer-events-none">
-                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 21.25%"></div><div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 42.5%"></div><div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 63.75%"></div>
-                    <div class="absolute top-0 h-full border-l-4 border-red-600 shadow-[0_0_10px_rgba(220,38,38,0.8)]" style="left: 85%"></div>
+            <div id="race-container" class="border-2 border-amber-800 ${courseColor} relative overflow-hidden shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]" style="height: 450px;">
+                <div id="race-track" class="absolute top-0 left-0 h-full will-change-transform" style="width: 400%;">
+                    <div class="absolute top-0 left-0 w-full h-full pointer-events-none" style="background-image: ${trackBgStyle}"></div>
+                    
+                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 23.75%"></div>
+                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 47.5%"></div>
+                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 71.25%"></div>
+                    
+                    <div class="absolute top-0 h-full border-l-4 border-red-600 shadow-[0_0_10px_rgba(220,38,38,0.8)]" style="left: 95%"></div>
+                    <div class="absolute top-2 text-white/50 font-bold text-2xl" style="left: calc(95% + 10px)">GOAL</div>
+                    
+                    ${horsesDOM}
                 </div>
-                ${horsesDOM}
-                <div class="absolute bottom-3 right-3 z-30">
+                
+                <div class="absolute bottom-3 right-3 z-30 flex gap-2">
+                    <div id="race-minimap" class="bg-black/50 text-white text-xs px-2 py-1 rounded-sm border border-gray-600 hidden md:flex items-center">
+                        残り: <span id="distance-left" class="font-bold text-yellow-400 ml-1 w-12 text-right">---</span> m
+                    </div>
                     ${(state.mode === 'single' || state.mode === 'hardcore') ? `<button onclick="skipRace()" class="bg-gray-900 text-amber-500 text-xs px-3 py-1.5 rounded-sm border border-amber-700 hover:bg-gray-800 transition-colors shadow-lg">SKIP ⏩</button>` : ''}
                 </div>
             </div>
