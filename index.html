@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>レトロ競馬シミュレーター</title>
+    <title>レトロダービーマスター</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -13,23 +13,29 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* 疾走感を出す背景スクロールアニメーション */
-        @keyframes scrollBg {
-            0% { background-position: 0 0; }
-            100% { background-position: -100px 0; }
-        }
-        .bg-scroll {
-            background-image: repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px);
-            animation: scrollBg 0.4s linear infinite;
+        /* パララックススクロール用の多重背景アニメーション定義 */
+        .bg-sky-parallax {
+            background: linear-gradient(to bottom, #1e3a8a, #3b82f6);
+            background-size: 400px 100%;
         }
         
         /* 砂埃のアニメーション */
         @keyframes dustFly {
             0% { transform: translate(0, 0) scale(0.8); opacity: 0.8; }
-            100% { transform: translate(-20px, -5px) scale(1.5); opacity: 0; }
+            100% { transform: translate(-25px, -8px) scale(1.8); opacity: 0; }
         }
         .dust-anim {
-            animation: dustFly 0.3s linear infinite;
+            animation: dustFly 0.25s linear infinite;
+        }
+
+        /* 画面振動（デッドヒート時） */
+        @keyframes shake {
+            0%, 100% { transform: translate(0, 0); }
+            10%, 30%, 50%, 70%, 90% { transform: translate(-2px, -2px); }
+            20%, 40%, 60%, 80% { transform: translate(2px, 2px); }
+        }
+        .camera-shake {
+            animation: shake 0.15s infinite;
         }
     </style>
 </head>
@@ -51,7 +57,7 @@
 
             <div>
                 <h1 class="text-xl md:text-2xl font-bold text-yellow-400 tracking-widest drop-shadow-[0_0_5px_rgba(250,204,21,0.8)]">
-                    🐎 RETRO STAR HORSE
+                    RETRO DERBY MASTER
                 </h1>
                 <p id="header-race-count" class="text-xs text-amber-600 font-bold mt-1">RACE 1</p>
             </div>
@@ -138,6 +144,7 @@
                 const result = await signInWithPopup(auth, provider);
                 if (result.user) {
                     await window.executeCloudLoad();
+                    // クラウドに名前がなかった場合はGoogleアカウントの名前を使用
                     if (!state.playerName || state.playerName.startsWith("ゲスト")) {
                         state.playerName = result.user.displayName || "プレイヤー";
                     }
@@ -216,7 +223,7 @@
             { bg: 'bg-pink-400', text: 'text-black', border: 'border-pink-600' }
         ];
 
-        // ★コースデータ追加
+        // コースデータ
         const COURSES = [
             { name: "東京", distance: 2400, type: "芝", color: "bg-[#1a472a]" },
             { name: "中山", distance: 2000, type: "芝", color: "bg-[#2d5a27]" },
@@ -398,9 +405,16 @@
             myHorses: [],
             trainingHorse: null,
             training: { turn: 10, hp: 100, maxHp: 100 },
-            isDead: false 
+            isDead: false,
+            // オークション用データ
+            auctionHorse: null,
+            auctionBids: [],
+            auctionMyBid: 0,
+            auctionCpuBid: 0,
+            auctionFinished: false
         };
 
+        // --- ランキング同期機能 ---
         window.updateRanking = async () => {
             try {
                 if (!state.playerName || state.money <= 0) return;
@@ -415,6 +429,7 @@
             }
         };
 
+        // --- 所持金の同期機能 ---
         window.syncMoney = (newMoney) => {
             state.money = newMoney;
             window.updateHeader();
@@ -426,6 +441,7 @@
             window.updateRanking(); 
         };
 
+        // --- BET金額の更新 ---
         window.updateBetAmount = (val) => {
             if (val === "") {
                 state.betAmount = "";
@@ -437,7 +453,6 @@
             }
         };
 
-        // ★ onclick経由で呼ばれる際、state未定義エラーを防ぐために文字列で受ける
         window.setBetAmountByButton = (type) => {
             if (type === 'half') {
                 state.betAmount = Math.floor(state.money / 2);
@@ -550,7 +565,7 @@
             window.openModal(`
                 <h3 class="text-xl text-yellow-400 font-bold mb-6 text-center">⚙️ 設定</h3>
                 <div class="flex flex-col gap-4 mb-6 px-4">
-                    <a href="mailto:j7fuji.ka@gmail.com?subject=【レトロ競馬】問い合わせ" class="block text-center bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold py-4 rounded border border-blue-500 transition-colors shadow-md">
+                    <a href="mailto:j7fuji.ka@gmail.com?subject=【レトロダービーマスター】問い合わせ" class="block text-center bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold py-4 rounded border border-blue-500 transition-colors shadow-md">
                         📧 開発者へ問い合わせる
                     </a>
                 </div>
@@ -564,13 +579,15 @@
             window.openModal(`
                 <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">📖 遊び方</h3>
                 <div class="text-xs md:text-sm text-gray-300 mb-4 h-64 overflow-y-auto space-y-3 border border-amber-900 p-3 bg-black rounded shadow-inner hide-scrollbar">
-                    <p><strong class="text-white">【基本ルール】</strong><br>所持金を使って馬券を買い、レースで資金を増やしましょう。所持金が0になり、売却できる馬もいないとゲームオーバーになります。</p>
+                    <p><strong class="text-white">【基本ルール】</strong><br>所持金を使って馬券を買い, レースで資金を増やしましょう。所持金が0になり, 売却できる馬もいないとゲームオーバーになります。</p>
+                    <p><strong class="text-white">【経済調整・資金回収システム】</strong><br>
+                    インフレ対策として以下の出費が発生します。<br>
+                    - <strong>厩舎維持費</strong>: レース毎に所有馬の強さと数に比例した維持費が引かれます。<br>
+                    - <strong>富裕税</strong>: 所持金が100万円、1000万円を超えると引かれる税金が高くなります。<br>
+                    - <strong>延命治療</strong>: 寿命寸前の馬を若返らせる高額なサプリメント。<br>
+                    - <strong>オークション</strong>: CPUと価格を競うリアルなセリ市で名馬を購入。</p>
                     <p><strong class="text-white">【コースと距離】</strong><br>レースごとにコースや距離（1200m〜3200m）が変わります。距離が長いほどスタミナを消耗しやすくなります。</p>
                     <p><strong class="text-white">【ハードコアモード】</strong><br>ひとりで遊ぶの高難易度モードです。馬券が的中すれば配当は常に1万倍ですが、<span class="text-red-400 font-bold">馬券は1レースにつき1枚しか買えません</span>。一度でもハズレると全財産と愛馬が没収されます。</p>
-                    <p><strong class="text-white">【マイホースの育成】</strong><br>資金が貯まると、最大6頭まで自分だけの馬を購入し育成できます。調教メニューを選んでステータスを上げましょう。</p>
-                    <p><strong class="text-white">【マイホースの出走と寿命】</strong><br>育成したマイホースは、高確率（90%）で通常のレースに乱入出走します。ただし、レースをこなすたびに寿命が減り、0になると引退してしまいます。</p>
-                    <p><strong class="text-white">【みんなで遊ぶ (マルチプレイ)】</strong><br>友達と部屋を作って対戦できます。ホストやゲストが育てた馬もオンラインのレースに参戦します！</p>
-                    <p><strong class="text-white">【ショップ・名前変更・ランキング】</strong><br>稼いだお金を使って初期資金倍率をアップグレードしたり、名前を変更したりできます。所持金ランキングでトップを目指しましょう。</p>
                 </div>
                 <div class="text-center">
                     <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-8 py-2 rounded border border-gray-600 transition-colors">閉じる</button>
@@ -606,7 +623,7 @@
                     馬券が的中すれば<span class="text-yellow-400 font-bold">配当が強制的に1万倍</span>になりますが、<br>
                     <span class="text-red-400 font-bold">一度でも馬券を外すと、全財産と愛馬が没収されゼロからになります。</span><br>
                 </p>
-                <p class="text-sm text-white font-bold mb-6 text-center">本当に挑戦しますか？</p>
+                <p class="text-sm text-white font-bold mb-6 text-center">本当に挑戦しますか?</p>
                 <div class="flex justify-between px-4">
                     <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded border border-gray-600 transition-colors">やめる</button>
                     <button onclick="startGame('hardcore')" class="bg-red-800 hover:bg-red-700 text-white font-bold px-6 py-2 rounded border border-red-500 transition-colors shadow-[0_0_15px_rgba(220,38,38,0.8)]">挑戦する</button>
@@ -650,7 +667,7 @@
             window.openModal(`
                 <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">🛒 ショップ</h3>
                 <div class="mb-4 text-right border-b border-amber-900/50 pb-2">
-                    <span class="text-[10px] text-amber-600 mr-2">手持ちの資金:</span>
+                    <span class="text-[10px] text-amber-600 mr-2">手持ち of 資金:</span>
                     <span class="text-xl text-yellow-400 font-bold">${state.money.toLocaleString()} 円</span>
                 </div>
                 ${shopContent}
@@ -668,7 +685,7 @@
             if (state.money < nextUpgrade.cost) {
                 const errEl = document.getElementById('shop-error');
                 if (errEl) {
-                    errEl.innerText = "所持金が足りません！レースで稼いできてください。";
+                    errEl.innerText = "所持金が足りません！";
                     errEl.classList.remove('hidden');
                 }
                 return;
@@ -1342,6 +1359,232 @@
             });
         };
 
+        // ★ 若返り（延命サプリ）モーダル
+        window.showSupplementModal = (id) => {
+            const h = state.myHorses.find(horse => horse.id === id);
+            if (!h) return;
+            
+            // 延命費用（基本300,000円）
+            const cost = 300000;
+            
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">💊 延命治療（若返りサプリ）</h3>
+                <p class="text-sm text-gray-300 mb-2 text-center">愛馬「<span class="font-bold text-white">${h.name}</span>」の寿命を延ばします。</p>
+                <p class="text-xs text-amber-500 mb-4 text-center">現在の残り寿命: <span class="font-bold text-yellow-400">${h.lifespan}戦</span></p>
+                <div class="bg-black border border-amber-800 p-4 rounded mb-6 text-center">
+                    <p class="text-xs text-gray-400 mb-1">延命治療費</p>
+                    <p class="text-2xl text-yellow-400 font-bold">${cost.toLocaleString()} 円</p>
+                    <p class="text-[10px] text-gray-500 mt-1">※寿命がランダムに 8〜14戦 増加します</p>
+                </div>
+                <div class="flex justify-between px-4">
+                    <button onclick="closeModal()" class="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded border border-gray-600 transition-colors">やめる</button>
+                    <button onclick="executeSupplement(${id}, ${cost})" class="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-2 rounded border border-green-400 transition-colors shadow-md">投与する</button>
+                </div>
+                <p id="supp-error" class="text-red-500 text-xs hidden text-center font-bold mt-3"></p>
+            `);
+        };
+
+        window.executeSupplement = (id, cost) => {
+            const h = state.myHorses.find(horse => horse.id === id);
+            if (!h) return;
+            const errEl = document.getElementById('supp-error');
+
+            if (state.money < cost) {
+                if (errEl) {
+                    errEl.innerText = "資金が足りません！";
+                    errEl.classList.remove('hidden');
+                }
+                return;
+            }
+
+            state.money -= cost;
+            const extension = randomInt(8, 14);
+            h.lifespan += extension;
+
+            window.syncMoney(state.money);
+            window.closeModal();
+            window.setMessage(`${h.name} に若返りサプリを投与し、寿命が ${extension}戦 伸びました！`);
+            window.render();
+        };
+
+        // ★ セリ市（オークション）開始
+        window.startAuction = () => {
+            if (state.myHorses.length >= 6) {
+                window.setMessage(`厩舎が満員です。最大6頭までしか所有できません。`);
+                return;
+            }
+
+            // 新しい強力な新馬を生成
+            const baseSpeed = randomInt(78, 98);
+            const stamina = randomInt(75, 96);
+            const guts = randomInt(75, 95);
+            const prefix = ["伝説の", "幻の", "ロイヤル", "ギャラクシー", "神話の"];
+            const nameBase = HORSE_NAMES[randomInt(0, HORSE_NAMES.length - 1)];
+            const name = `${prefix[randomInt(0, prefix.length - 1)]}${nameBase}`;
+
+            state.auctionHorse = {
+                id: Date.now(),
+                name: name,
+                type: TYPES[randomInt(0, TYPES.length - 1)],
+                speed: baseSpeed,
+                stamina: stamina,
+                guts: guts,
+                lifespan: randomInt(15, 24),
+                lastRaceResult: "新馬",
+                ownerName: state.playerName
+            };
+
+            // オークション初期化
+            state.auctionMyBid = 100000; // 開始価格
+            state.auctionCpuBid = 100000;
+            state.auctionFinished = false;
+
+            window.showAuctionModal();
+        };
+
+        window.showAuctionModal = () => {
+            const h = state.auctionHorse;
+            if (!h) return;
+
+            let bidControls = "";
+            if (!state.auctionFinished) {
+                bidControls = `
+                    <div class="grid grid-cols-3 gap-2 mb-4">
+                        <button onclick="raiseBid(50000)" class="bg-gray-800 hover:bg-gray-700 text-amber-400 py-2 rounded text-xs border border-gray-600 font-bold">+5万円</button>
+                        <button onclick="raiseBid(100000)" class="bg-gray-800 hover:bg-gray-700 text-amber-400 py-2 rounded text-xs border border-gray-600 font-bold">+10万円</button>
+                        <button onclick="raiseBid(500000)" class="bg-gray-800 hover:bg-gray-700 text-amber-400 py-2 rounded text-xs border border-gray-600 font-bold">+50万円</button>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="closeModal()" class="w-1/2 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded text-sm border border-gray-600 font-bold">降りる(辞退)</button>
+                        <button onclick="finishAuction()" class="w-1/2 bg-gradient-to-b from-yellow-500 to-yellow-700 hover:from-yellow-400 hover:to-yellow-600 text-black py-3 rounded text-sm font-bold shadow-md">ハンマー(落札確定)</button>
+                    </div>
+                `;
+            } else {
+                bidControls = `
+                    <button onclick="closeModal()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded font-bold border border-blue-400 shadow-md">厩舎に戻る</button>
+                `;
+            }
+
+            window.openModal(`
+                <h3 class="text-xl text-yellow-400 font-bold mb-4 text-center">🔨 セリオークション 🔨</h3>
+                <p class="text-xs text-gray-400 text-center mb-4">世界に1頭の幻の幼駒を競り落とせ！</p>
+                
+                <div class="bg-black border border-amber-900 p-3 rounded mb-4">
+                    <p class="text-sm text-yellow-400 font-bold text-center mb-1">「${h.name}」</p>
+                    <p class="text-[10px] text-gray-500 text-center mb-2">タイプ: ${h.type} | 初期能力予想</p>
+                    <div class="grid grid-cols-3 gap-1 text-[10px] text-center">
+                        <div class="bg-gray-950 p-1 border border-gray-800 rounded">
+                            <span class="text-blue-400 block">スピード</span>
+                            <span class="text-white font-bold">${h.speed}</span>
+                        </div>
+                        <div class="bg-gray-950 p-1 border border-gray-800 rounded">
+                            <span class="text-orange-400 block">スタミナ</span>
+                            <span class="text-white font-bold">${h.stamina}</span>
+                        </div>
+                        <div class="bg-gray-950 p-1 border border-gray-800 rounded">
+                            <span class="text-red-400 block">根性</span>
+                            <span class="text-white font-bold">${h.guts}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 mb-6">
+                    <div class="bg-gray-900 border border-blue-900 p-3 rounded text-center">
+                        <span class="text-blue-400 text-[10px] block mb-1">あなたの入札額</span>
+                        <span class="text-lg text-white font-bold">${state.auctionMyBid.toLocaleString()} 円</span>
+                    </div>
+                    <div class="bg-gray-900 border border-red-900 p-3 rounded text-center">
+                        <span class="text-red-400 text-[10px] block mb-1">ライバルの最高入札額</span>
+                        <span class="text-lg text-white font-bold animate-pulse">${state.auctionCpuBid.toLocaleString()} 円</span>
+                    </div>
+                </div>
+
+                <p id="auction-alert" class="text-yellow-400 text-[10px] text-center font-bold mb-4 animate-bounce"></p>
+                <p id="auction-error" class="text-red-500 text-xs hidden text-center font-bold mb-4"></p>
+
+                ${bidControls}
+            `);
+        };
+
+        window.raiseBid = (amount) => {
+            const errEl = document.getElementById('auction-error');
+            const alertEl = document.getElementById('auction-alert');
+            if (errEl) errEl.classList.add('hidden');
+
+            const nextBid = state.auctionCpuBid + amount;
+            if (state.money < nextBid) {
+                if (errEl) {
+                    errEl.innerText = "資金が足りません！";
+                    errEl.classList.remove('hidden');
+                }
+                return;
+            }
+
+            state.auctionMyBid = nextBid;
+
+            // CPUがさらに競り合ってくるか判定 (能力が高いほどCPUは引き下がらない)
+            const stats = state.auctionHorse.speed + state.auctionHorse.stamina + state.auctionHorse.guts;
+            const threshold = stats * 1800; // 最大限CPUが追ってくる限界額
+            
+            if (state.auctionMyBid < threshold && Math.random() < 0.85) {
+                // CPUが上乗せしてくる
+                const cpuRaise = randomInt(1, 3) * 50000;
+                state.auctionCpuBid = state.auctionMyBid + cpuRaise;
+                if (alertEl) {
+                    alertEl.innerText = "🎙️ 「他に入札はございませんか！ ライバルがさらに上乗せ！」";
+                }
+            } else {
+                state.auctionCpuBid = state.auctionMyBid;
+                if (alertEl) {
+                    alertEl.innerText = "🎙️ 「他に入札はございませんね！？」";
+                }
+            }
+
+            window.showAuctionModal();
+        };
+
+        window.finishAuction = () => {
+            const errEl = document.getElementById('auction-error');
+            if (state.auctionMyBid < state.auctionCpuBid) {
+                if (errEl) {
+                    errEl.innerText = "相手の入札額を下回っているため落札できません！";
+                    errEl.classList.remove('hidden');
+                }
+                return;
+            }
+
+            // ★ 落札確定時の資金チェックをより厳密に行う（バグ修正）
+            if (state.money < state.auctionMyBid) {
+                if (errEl) {
+                    errEl.innerText = "落札額に対する所持金が足りません！";
+                    errEl.classList.remove('hidden');
+                }
+                return;
+            }
+
+            // 落札確定処理
+            state.money -= state.auctionMyBid;
+            state.myHorses.push(state.auctionHorse);
+
+            state.auctionFinished = true;
+            window.syncMoney(state.money);
+
+            window.openModal(`
+                <h3 class="text-2xl text-yellow-400 font-bold mb-4 text-center">🎉 落札決定！ 🎉</h3>
+                <p class="text-sm text-gray-300 text-center mb-6">
+                    見事に <span class="font-bold text-white">${state.auctionMyBid.toLocaleString()} 円</span> で<br>
+                    「<span class="text-yellow-400 font-bold">${state.auctionHorse.name}</span>」を競り落としました！
+                </p>
+                <div class="text-center">
+                    <button onclick="closeModal()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-8 rounded border border-blue-400 transition-colors shadow-md">厩舎に迎え入れる</button>
+                </div>
+            `);
+
+            state.auctionHorse = null;
+            state.horses = generateHorses(true);
+            window.render();
+        };
+
         window.render = function() {
             const header = document.getElementById('main-header');
             const messageBoard = document.getElementById('message-board');
@@ -1401,21 +1644,13 @@
         };
 
         window.buyHorse = () => {
-            if (state.myHorses.length >= 6) {
-                window.setMessage(`厩舎が満員です。最大6頭までしか所有できません。（馬を売却するか、寿命を迎えるまでお待ちください）`);
+            // ★ 所持金がセリ市（オークション）の最低開始価格（100,000円）未満の場合は入場不可
+            if (state.money < 100000) {
+                window.setMessage(`セリ市（オークション）に参加するには、最低でも 100,000円 の資金が必要です！`);
                 return;
             }
-
-            const cost = 50000 * (state.myHorses.length + 1);
-            if (state.money < cost) {
-                window.setMessage(`馬の購入には ${cost.toLocaleString()} 円必要です。レースで資金を増やしましょう！`);
-                return;
-            }
-            window.syncMoney(state.money - cost);
-            state.myHorseTempType = '逃げ';
-            state.phase = 'create';
-            window.setMessage(`馬を購入しました！あなただけの愛馬を作成してください。`);
-            window.render();
+            // セリ市に移行
+            window.startAuction();
         };
 
         window.setMyHorseType = (type) => {
@@ -1448,9 +1683,33 @@
             let hpCost = 25;
             let failureRate = Math.max(0, (40 - state.training.hp) / 40); 
             
+            // ★ 各種「エリート調教」の価格
+            const elitistCost = 50000;
+
             if (menu === 'rest') {
                 state.training.hp = Math.min(state.training.maxHp, state.training.hp + 60);
                 msg = `休養をとった。体力が回復した！`;
+                state.training.turn--;
+            } else if (menu.startsWith('elite_')) {
+                // お金を使う代わりに、体力を消費しない超効率調教！
+                if (state.money < elitistCost) {
+                    window.setMessage(`エリートサイエンス調教には ${elitistCost.toLocaleString()}円 が必要です。資金が足りません！`);
+                    return;
+                }
+                state.money -= elitistCost;
+                window.syncMoney(state.money);
+                
+                let up = randomInt(10, 18); // 通常より伸び幅が大きい
+                if (menu === 'elite_speed') {
+                    state.trainingHorse.speed = Math.min(100, state.trainingHorse.speed + up);
+                    msg = `🧪超高価・サイエンス温熱トレ！スピードを一気に ${up} 上げた！`;
+                } else if (menu === 'elite_stamina') {
+                    state.trainingHorse.stamina = Math.min(100, state.trainingHorse.stamina + up);
+                    msg = `🧪超高価・低酸素スタミナカプセル！スタミナを一気に ${up} 上げた！`;
+                } else if (menu === 'elite_guts') {
+                    state.trainingHorse.guts = Math.min(100, state.trainingHorse.guts + up);
+                    msg = `🧪超高価・VRバーチャル坂路トレ！根性を一気に ${up} 上げた！`;
+                }
                 state.training.turn--;
             } else {
                 if (Math.random() < failureRate) {
@@ -1464,11 +1723,11 @@
                         msg = `芝コースで調教！スピードが ${up} 上がった！`; 
                     }
                     if (menu === 'stamina') { 
-                        state.trainingHorse.stamina = Math.min(100, state.trainingHorse.stamina + up);
+                        state.trainingHorse.stamina = Math.min(100, state.trainingHorse.stamina + up); 
                         msg = `ダートコースで調教！スタミナが ${up} 上がった！`; 
                     }
                     if (menu === 'guts') { 
-                        state.trainingHorse.guts = Math.min(100, state.trainingHorse.guts + up);
+                        state.trainingHorse.guts = Math.min(100, state.trainingHorse.guts + up); 
                         msg = `坂路で調教！根性が ${up} 上がった！`; 
                     }
                 }
@@ -1482,7 +1741,7 @@
                 state.trainingHorse = null;
                 state.phase = 'betting';
                 state.horses = generateHorses(true);
-                window.setMessage(`育成完了！ ${horseName} が厩舎に入りました。次以降のレースでランダムに出走します！`);
+                window.setMessage("育成完了！ " + horseName + " が厩舎に入りました。次以降のレースでランダムに出走します！");
             } else {
                 window.setMessage(msg + ` (残り${state.training.turn}週)`);
             }
@@ -1490,7 +1749,7 @@
         };
 
         window.addBet = () => {
-            // ★ ハードコアモードでの馬券枚数制限
+            // ★ ハードコアモードでの馬券枚数制限（1枚制限）
             if (state.mode === 'hardcore' && state.bets.length >= 1) {
                 window.setMessage("☠️ ハードコアモードでは馬券は1枚しか買えません！");
                 return;
@@ -1605,7 +1864,7 @@
                         h.x += h.currentSpeed * 0.8;
                         h.yOffset = Math.sin(tick * h.currentSpeed * 0.4) * 3; 
                         
-                        const horseEl = document.getElementById(`horse-dom-${h.no}`);
+                        const horseEl = document.getElementById('horse-dom-' + h.no);
                         if (horseEl) {
                             horseEl.style.left = `${(h.x / raceLength) * (goalRatio * 100)}%`;
                             horseEl.style.top = `calc(${index * 12 + 2}% + ${h.yOffset}px)`;
@@ -1621,10 +1880,10 @@
                         h.finishTick = Infinity;
                         accidentMsg = `🎙️ ああっ！！ ${h.no}番 ${h.name} にアクシデント発生！！ 競走を中止しました！！`;
                         
-                        const horseEl = document.getElementById(`horse-dom-${h.no}`);
+                        const horseEl = document.getElementById('horse-dom-' + h.no);
                         if (horseEl) {
-                            document.getElementById(`horse-emoji-${h.no}`).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100"></span>💥`;
-                            document.getElementById(`horse-dust-${h.no}`).style.display = 'none';
+                            document.getElementById('horse-emoji-' + h.no).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100"></span>💥`;
+                            document.getElementById('horse-dust-' + h.no).style.display = 'none';
                         }
                         return; 
                     }
@@ -1668,14 +1927,14 @@
                         h.finishTick += h.randomFactor * 0.01;
                     }
 
-                    const horseEl = document.getElementById(`horse-dom-${h.no}`);
+                    const horseEl = document.getElementById('horse-dom-' + h.no);
                     if (horseEl) {
                         horseEl.style.left = `${(h.x / raceLength) * (goalRatio * 100)}%`;
                         horseEl.style.top = `calc(${index * 12 + 2}% + ${h.yOffset}px)`;
                         const delayStr = (h.isDelayed && h.x < 100) ? '💦' : '';
-                        document.getElementById(`horse-emoji-${h.no}`).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100">${delayStr}</span>🏇`;
+                        document.getElementById('horse-emoji-' + h.no).innerHTML = `<span class="absolute top-0 right-0 text-xs transform scale-x-100">${delayStr}</span>🏇`;
                         
-                        const dustEl = document.getElementById(`horse-dust-${h.no}`);
+                        const dustEl = document.getElementById('horse-dust-' + h.no);
                         if (h.currentSpeed > 1.5 && !h.hasFinished) {
                             dustEl.style.display = 'block';
                             dustEl.classList.add('dust-anim');
@@ -1696,12 +1955,22 @@
                     
                     const topHorsePx = (currentTopX / raceLength) * (fullTrackWidth * goalRatio);
 
-                    let cameraX = topHorsePx - (viewportWidth * 0.7);
+                    // ★ ライブ中継カメラのさらなる臨場感（スパート時のズーム・カメラシェイク）
+                    let cameraX = topHorsePx - (viewportWidth * 0.65);
                     if (cameraX < 0) cameraX = 0;
                     const maxCameraX = fullTrackWidth - viewportWidth;
                     if (cameraX > maxCameraX) cameraX = maxCameraX;
 
                     track.style.transform = `translateX(-${cameraX}px)`;
+
+                    // 直線スパート(80%超え)での迫力のズームイン＆カメラシェイク
+                    const progRatio = currentTopX / raceLength;
+                    if (progRatio > 0.8 && progRatio < goalRatio) {
+                        viewport.classList.add('camera-shake');
+                        track.style.transform += ` scale(1.08) translateY(10px)`;
+                    } else {
+                        viewport.classList.remove('camera-shake');
+                    }
                 }
 
                 const progInt = Math.min(100, Math.floor((currentTopX / raceLength) * 100));
@@ -1727,7 +1996,7 @@
                         if (topHorse.x - secondHorse.x < 25) {
                             newMsg = `残りわずか！ ${topHorse.name} と ${secondHorse.name} の激しい叩き合いだ！！`;
                         } else {
-                            newMsg = `${topHorse.name}、完全に抜け出した！ これは強い！！`;
+                            newMsg = `${topHorse.name}、完全に抜け出した！ Ormondは強い！！`;
                         }
                     }
                 }
@@ -1741,6 +2010,7 @@
                 }
 
                 if (allFinished) {
+                    viewport.classList.remove('camera-shake');
                     window.finishRaceLocal();
                 } else {
                     state.animationRef = requestAnimationFrame(animate);
@@ -1748,6 +2018,33 @@
             };
             
             state.animationRef = requestAnimationFrame(animate);
+        };
+
+        window.skipRace = () => {
+            cancelAnimationFrame(state.animationRef);
+            let safetyCounter = 0;
+            const raceLength = state.currentCourse ? state.currentCourse.distance : 1000;
+            
+            while(state.horsesRef.some(h => !h.hasFinished && !h.isRetired) && safetyCounter < 5000) {
+                state.horsesRef.forEach(h => {
+                    if(!h.hasFinished && !h.isRetired) {
+                        if (h.isAccident) {
+                            h.isRetired = true;
+                            h.finishTick = Infinity;
+                        } else {
+                            const prevX = h.x;
+                            const speed = h.speed / 5;
+                            h.x += speed;
+                            if (h.x >= raceLength) {
+                                h.hasFinished = true;
+                                  h.finishTick = safetyCounter - 1 + (raceLength - prevX) / speed + (h.randomFactor * 0.01);
+                            }
+                        }
+                    }
+                });
+                safetyCounter++;
+            }
+            window.finishRaceLocal();
         };
 
         window.finishRaceLocal = function() {
@@ -1850,6 +2147,7 @@
                 }
             });
 
+            // ★ハードコアモードの没収（死亡）判定
             if (state.mode === 'hardcore' && state.bets.length > 0) {
                 const hasHit = state.bets.some(b => b.isHit);
                 if (!hasHit) {
@@ -1887,10 +2185,16 @@
                 }
             }
 
+            // 寿命システム (生存している場合)
             let retiredHorses = [];
             let survivingHorses = [];
-            if (!state.isDead) {
+            let totalMaintenanceFee = 0; // 強制的に徴収する愛馬の維持費
+
+            if (!state.isDead && (state.mode === 'single' || state.mode === 'hardcore')) {
+                // 1頭毎に「(スピード+スタミナ+根性) * 15」の維持費が発生
                 state.myHorses.forEach(h => {
+                    totalMaintenanceFee += Math.floor((h.speed + h.stamina + h.guts) * 15);
+                    
                     h.lifespan -= 1;
                     if (h.lifespan <= 0) {
                         retiredHorses.push(h.name);
@@ -1907,57 +2211,51 @@
                 }
             }
 
+            // 富裕税の徴収（累進課税：所持金が多いほど高く回収する）
+            let currentTotalMoney = state.money + totalPayout;
+            let taxAmount = 0;
+            if (state.mode === 'single' || state.mode === 'hardcore') {
+                if (currentTotalMoney >= 10000000) {
+                    taxAmount = Math.floor(currentTotalMoney * 0.25); // 1000万円以上は25%
+                } else if (currentTotalMoney >= 1000000) {
+                    taxAmount = Math.floor(currentTotalMoney * 0.15); // 100万円以上は15%
+                } else if (currentTotalMoney >= 100000) {
+                    taxAmount = Math.floor(currentTotalMoney * 0.05); // 10万円以上は5%
+                }
+            }
+
+            const finalNetMoney = Math.max(0, currentTotalMoney - totalMaintenanceFee - taxAmount);
+
+            // 結果メッセージ生成
             let finalMsg = "";
             if (totalPayout > 0) {
                 finalMsg = `的中！ 払い戻し・賞金合計 ${totalPayout.toLocaleString()} 円 です！${prizeMsg}`;
-                window.syncMoney(state.money + totalPayout);
             } else if (state.bets.length > 0) {
                 finalMsg = `ハズレ... 次のレースに期待しましょう。${prizeMsg}`;
             } else {
                 finalMsg = `馬券を買っていませんでしたね。${prizeMsg}`;
             }
 
+            if (state.mode === 'single' || state.mode === 'hardcore') {
+                if (totalMaintenanceFee > 0) {
+                    finalMsg += ` [厩舎維持費: -${totalMaintenanceFee.toLocaleString()}円]`;
+                }
+                if (taxAmount > 0) {
+                    finalMsg += ` [所得・富裕税: -${taxAmount.toLocaleString()}円]`;
+                }
+            }
+
             if (retiredHorses.length > 0 && !state.isDead) {
                 finalMsg += ` 【悲報】${retiredHorses.join('、')} が寿命を迎え引退しました...`;
             }
 
+            window.syncMoney(finalNetMoney);
             window.setMessage(finalMsg);
             window.render(); 
         };
 
+        // --- HTML生成 ---
         function getTitleHTML() {
-            if (!state.loginSelected) {
-                return `
-                <div class="relative flex flex-col items-center justify-center min-h-[500px] md:min-h-[600px] bg-[#1a472a] border-2 border-amber-800 shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
-                    <div class="absolute top-0 left-0 w-[200%] h-full pointer-events-none bg-scroll opacity-50"></div>
-                    
-                    <div class="z-20 text-center mb-10 transform hover:scale-105 transition-transform duration-500">
-                        <h1 class="text-5xl md:text-7xl font-bold text-yellow-400 tracking-widest drop-shadow-[0_5px_10px_rgba(0,0,0,1)] mb-4" style="-webkit-text-stroke: 2px #b45309;">
-                            RETRO<br>STAR HORSE
-                        </h1>
-                        <p class="text-amber-300 text-sm tracking-widest bg-black/60 inline-block px-4 py-1.5 rounded border border-amber-900/50">レトロ競馬シミュレーター</p>
-                    </div>
-
-                    <div class="z-20 flex flex-col gap-4 w-72 md:w-80 bg-black/80 p-6 rounded border-2 border-amber-600 shadow-[0_0_20px_rgba(0,0,0,0.8)]">
-                        <p class="text-center text-sm text-gray-300 mb-2">プレイ方法を選んでください</p>
-                        
-                        <button onclick="loginWithGoogleTitle()" class="bg-white text-gray-900 font-bold text-lg py-3 rounded-sm border-2 border-gray-300 shadow-md active:transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 hover:bg-gray-100">
-                            <svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                            Googleでログイン
-                        </button>
-                        <p class="text-[10px] text-blue-400 text-center -mt-3">クラウドにセーブデータを保存できます</p>
-                        
-                        <div class="border-b border-gray-600 my-1"></div>
-
-                        <button onclick="showGuestNameModal()" class="bg-gray-800 text-white font-bold text-lg py-3 rounded-sm border-2 border-gray-600 shadow-md active:transform active:scale-[0.98] transition-all hover:bg-gray-700">
-                            ゲストで遊ぶ
-                        </button>
-                        <p class="text-[10px] text-gray-400 text-center -mt-3">データは今のブラウザにのみ保存されます</p>
-                    </div>
-                </div>
-                `;
-            }
-
             return `
             <div class="relative flex flex-col items-center justify-center min-h-[500px] md:min-h-[600px] bg-[#1a472a] border-2 border-amber-800 shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
                 <div class="absolute top-0 left-0 w-[200%] h-full pointer-events-none bg-scroll opacity-50"></div>
@@ -1968,7 +2266,7 @@
 
                 <div class="z-20 text-center mb-10 transform hover:scale-105 transition-transform duration-500">
                     <h1 class="text-5xl md:text-7xl font-bold text-yellow-400 tracking-widest drop-shadow-[0_5px_10px_rgba(0,0,0,1)] mb-4" style="-webkit-text-stroke: 2px #b45309;">
-                        RETRO<br>STAR HORSE
+                        RETRO<br>DERBY MASTER
                     </h1>
                     <p class="text-amber-300 text-sm tracking-widest bg-black/60 inline-block px-4 py-1.5 rounded border border-amber-900/50">レトロ競馬シミュレーター</p>
                 </div>
@@ -2137,7 +2435,7 @@
                             </div>
                         </div>
 
-                        <div class="mb-6">
+                        <div class="mb-4">
                             <div class="flex justify-between text-xs text-amber-500 mb-1">
                                 <span>体力 (HP)</span>
                                 <span class="font-bold text-white">${state.training.hp} / ${state.training.maxHp}</span>
@@ -2148,22 +2446,32 @@
                             ${state.training.hp <= 40 ? '<p class="text-red-400 text-[10px] mt-1 animate-pulse">※怪我の確率が上がっています！</p>' : ''}
                         </div>
 
-                        <div class="grid grid-cols-2 gap-3 mt-auto">
-                            <button onclick="doTraining('speed')" class="h-16 bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold rounded-sm border border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
-                                <span>芝コース</span>
-                                <span class="text-[10px] text-blue-200 font-normal">スピードUP</span>
+                        <!-- 資金回収：超強力「サイエンス・エリートトレーニング」を追加！ -->
+                        <div class="border border-yellow-700/50 rounded p-2 mb-4 bg-yellow-950/20">
+                            <p class="text-[10px] text-yellow-400 font-bold mb-1">🧬 エリートサイエンス調教 (1回50,000円 / 体力消費なし！)</p>
+                            <div class="grid grid-cols-3 gap-1">
+                                <button onclick="doTraining('elite_speed')" class="bg-yellow-900/40 hover:bg-yellow-800/60 text-yellow-300 py-1.5 rounded text-[10px] border border-yellow-800 font-bold">🧬 超スピード</button>
+                                <button onclick="doTraining('elite_stamina')" class="bg-yellow-900/40 hover:bg-yellow-800/60 text-yellow-300 py-1.5 rounded text-[10px] border border-yellow-800 font-bold">🧬 超スタミナ</button>
+                                <button onclick="doTraining('elite_guts')" class="bg-yellow-900/40 hover:bg-yellow-800/60 text-yellow-300 py-1.5 rounded text-[10px] border border-yellow-800 font-bold">🧬 超根性</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 mt-auto">
+                            <button onclick="doTraining('speed')" class="h-12 bg-gradient-to-b from-blue-700 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white font-bold rounded-sm border border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>芝コース (通常)</span>
+                                <span class="text-[8px] text-blue-200 font-normal">スピードUP</span>
                             </button>
-                            <button onclick="doTraining('stamina')" class="h-16 bg-gradient-to-b from-orange-600 to-orange-800 hover:from-orange-500 hover:to-orange-700 text-white font-bold rounded-sm border border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
-                                <span>ダートコース</span>
-                                <span class="text-[10px] text-orange-200 font-normal">スタミナUP</span>
+                            <button onclick="doTraining('stamina')" class="h-12 bg-gradient-to-b from-orange-600 to-orange-800 hover:from-orange-500 hover:to-orange-700 text-white font-bold rounded-sm border border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>ダートコース (通常)</span>
+                                <span class="text-[8px] text-orange-200 font-normal">スタミナUP</span>
                             </button>
-                            <button onclick="doTraining('guts')" class="h-16 bg-gradient-to-b from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 text-white font-bold rounded-sm border border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
-                                <span>坂路</span>
-                                <span class="text-[10px] text-red-200 font-normal">根性UP</span>
+                            <button onclick="doTraining('guts')" class="h-12 bg-gradient-to-b from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 text-white font-bold rounded-sm border border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                                <span>坂路 (通常)</span>
+                                <span class="text-[8px] text-red-200 font-normal">根性UP</span>
                             </button>
-                            <button onclick="doTraining('rest')" class="h-16 bg-gradient-to-b from-green-700 to-green-900 hover:from-green-600 hover:to-green-800 text-white font-bold rounded-sm border border-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
+                            <button onclick="doTraining('rest')" class="h-12 bg-gradient-to-b from-green-700 to-green-900 hover:from-green-600 hover:to-green-800 text-white font-bold rounded-sm border border-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)] active:transform active:scale-[0.98] transition-all flex flex-col items-center justify-center">
                                 <span>休養</span>
-                                <span class="text-[10px] text-green-200 font-normal">体力回復</span>
+                                <span class="text-[8px] text-green-200 font-normal">体力大幅回復</span>
                             </button>
                         </div>
                     </div>
@@ -2177,15 +2485,16 @@
                 <button onclick="setBetType('${type}')" class="py-1.5 text-xs font-bold rounded-sm border transition-colors ${state.selectedBetType === type ? 'bg-amber-500 text-black border-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'bg-black text-amber-600 border-amber-900 hover:bg-gray-800 hover:text-amber-400'}">${type}</button>
             `).join('');
 
+            // ★ 枠線からのハミ出しを防ぐため、パディング、マージン、ボタンの高さなどを超最適化しました！
             const amountInputHtml = `
-                <div class="mt-2 mb-1 bg-gray-900 border-2 border-amber-700 rounded-sm p-2 flex items-center shadow-[0_0_8px_rgba(245,158,11,0.3)]">
-                    <span class="text-amber-500 font-bold text-xs mr-2">BET:</span>
-                    <input type="number" value="${state.betAmount}" min="100" step="100" onchange="updateBetAmount(this.value)" onkeyup="updateBetAmount(this.value)" class="flex-1 bg-black text-amber-400 text-right outline-none font-bold text-base px-2 py-1 rounded-sm border border-amber-900/50 focus:border-amber-500 transition-colors">
-                    <span class="text-amber-600 text-xs font-bold ml-2">円</span>
+                <div class="mt-1 mb-1 bg-gray-900 border-2 border-amber-700 rounded-sm p-1.5 flex items-center shadow-[0_0_8px_rgba(245,158,11,0.3)]">
+                    <span class="text-amber-500 font-bold text-xs mr-2 shrink-0">BET:</span>
+                    <input type="number" value="${state.betAmount}" min="100" step="100" onchange="updateBetAmount(this.value)" onkeyup="updateBetAmount(this.value)" class="w-full bg-black text-amber-400 text-right outline-none font-bold text-sm px-2 py-0.5 rounded-sm border border-amber-900/50 focus:border-amber-500 transition-colors">
+                    <span class="text-amber-600 text-xs font-bold ml-1.5 shrink-0">円</span>
                 </div>
-                <div class="flex gap-1 mb-4">
-                    <button onclick="setBetAmountByButton('half')" class="flex-1 bg-gray-800 text-amber-500 text-[10px] py-1.5 rounded-sm border border-gray-600 hover:bg-gray-700 transition-colors font-bold shadow-sm">HALF (半分)</button>
-                    <button onclick="setBetAmountByButton('all')" class="flex-1 bg-red-950 text-red-200 text-[10px] py-1.5 rounded-sm border border-red-800 hover:bg-red-800 transition-colors font-bold shadow-sm">ALL IN (全額)</button>
+                <div class="flex gap-1 mb-2">
+                    <button onclick="setBetAmountByButton('half')" class="flex-1 bg-gray-800 text-amber-500 text-[10px] py-1 rounded-sm border border-gray-600 hover:bg-gray-700 transition-colors font-bold shadow-sm">HALF (半分)</button>
+                    <button onclick="setBetAmountByButton('all')" class="flex-1 bg-red-950 text-red-200 text-[10px] py-1 rounded-sm border border-red-800 hover:bg-red-800 transition-colors font-bold shadow-sm">ALL IN (全額)</button>
                 </div>
             `;
 
@@ -2199,29 +2508,37 @@
                     myHorseList = state.myHorses.map((h, i) => {
                         const targetId = h.id || i; 
                         return `
-                        <div class="mb-1 border-b border-amber-900/50 pb-1">
+                        <div class="mb-2 border-b border-amber-900/30 pb-2">
                             <div class="flex justify-between items-center mb-1">
                                 <p class="text-[10px] text-white font-bold">${h.name} <span class="text-yellow-400">(${h.type})</span></p>
-                                <button onclick="showSellModal(${targetId})" class="bg-red-800 hover:bg-red-700 text-white text-[9px] px-2 py-0.5 rounded border border-red-600 transition-colors">売却</button>
+                                <div class="flex gap-1">
+                                    <button onclick="showSupplementModal(${targetId})" class="bg-green-800 hover:bg-green-700 text-white text-[9px] px-1.5 py-0.5 rounded border border-green-600 transition-colors">サプリ</button>
+                                    <button onclick="showSellModal(${targetId})" class="bg-red-800 hover:bg-red-700 text-white text-[9px] px-1.5 py-0.5 rounded border border-red-600 transition-colors">売却</button>
+                                </div>
                             </div>
-                            <p class="text-[9px] text-amber-500">ｽﾋﾟ:${h.speed} ｽﾀ:${h.stamina} 根性:${h.guts} | 寿命:残り${h.lifespan !== undefined ? h.lifespan : '?'}戦 | 前走:${h.lastRaceResult}</p>
+                            <p class="text-[9px] text-amber-500/80">ｽﾋﾟ:${h.speed} ｽﾀ:${h.stamina} 根性:${h.guts} | <span class="text-red-400 font-bold">寿命:残り${h.lifespan !== undefined ? h.lifespan : '?'}戦</span></p>
                         </div>
                     `}).join('');
                 } else {
-                    myHorseList = `<p class="text-[9px] text-gray-400 mb-2">お金を貯めて馬主になりましょう</p>`;
+                    myHorseList = `<p class="text-[9px] text-gray-400 mb-2">セリ市に参加して競走馬を購入しましょう</p>`;
                 }
 
+                // 強制徴収される維持費の予測表示
+                let estMaintenance = 0;
+                state.myHorses.forEach(h => estMaintenance += Math.floor((h.speed + h.stamina + h.guts) * 15));
+
                 ownerMenu = `
-                    <div class="border-2 border-amber-800 bg-gray-900 p-2 mt-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)] flex flex-col max-h-48">
-                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1 shrink-0 flex justify-between">
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 mt-2 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)] flex flex-col max-h-56">
+                        <div class="text-amber-300 text-xs mb-1.5 border-b border-amber-800 pb-0.5 shrink-0 flex justify-between items-center">
                             <span>■ OWNER MENU</span>
-                            <span class="text-yellow-500">${state.myHorses.length} / 6頭</span>
+                            <span class="text-yellow-500 text-[10px]">${state.myHorses.length} / 6頭</span>
                         </div>
-                        <div class="overflow-y-auto hide-scrollbar mb-2 flex-1">
+                        <div class="overflow-y-auto hide-scrollbar mb-1.5 flex-1">
                             ${myHorseList}
                         </div>
+                        <p class="text-[9px] text-red-400 font-bold mb-1 shrink-0 text-center">RACE毎の維持費: ${estMaintenance.toLocaleString()}円</p>
                         <button onclick="buyHorse()" class="w-full bg-gradient-to-b from-purple-600 to-purple-900 hover:from-purple-500 hover:to-purple-800 text-white font-bold py-1.5 rounded-sm border border-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.3)] active:transform active:scale-[0.98] transition-all text-xs tracking-wider shrink-0">
-                            馬を購入 (${buyCost/10000}万)
+                            🔨 オークション(セリ市)
                         </button>
                     </div>
                 `;
@@ -2300,7 +2617,7 @@
             const betList = state.bets.length === 0 ? `<p class="text-amber-800/50 text-[10px] text-center mt-4">NO TICKET</p>` : `<ul class="space-y-1">` + state.bets.map((bet, idx) => `
                 <li class="flex justify-between items-center text-[10px] bg-gray-900 p-1.5 border border-amber-900/50 hover:border-amber-700 transition-colors">
                     <div class="flex flex-col">
-                        <span class="text-yellow-500 font-bold tracking-wide">[${bet.type}]</span>
+                        <span class="text-yellow-500 font-bold tracking-wide">[{type}]</span>
                         <span class="text-white mt-0.5">${bet.horses.join(' - ')} <span class="text-amber-400 ml-2 font-bold">${bet.amount}円</span></span>
                     </div>
                     <button onclick="removeBet(${idx})" class="text-red-600 hover:text-red-400 text-lg px-2 font-bold">&times;</button>
@@ -2356,12 +2673,14 @@
                         <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1">■ SELECT BET TYPE</div>
                         <div class="grid grid-cols-2 gap-1">${betTypeBtns}</div>
                     </div>
-                    <div class="border-2 border-amber-800 bg-gray-900 p-2 flex-1 flex flex-col">
-                        <div class="text-amber-300 text-xs mb-2 border-b border-amber-800 pb-1">■ INPUT COIN</div>
-                        ${amountInputHtml}
-                        <div class="text-center mt-auto pt-2 border-t border-amber-800">
-                            <div class="text-[10px] text-amber-500/70 mb-1 h-4">選択中: ${state.selectedHorses.join(' - ') || 'なし'}</div>
-                            <button onclick="addBet()" class="w-full bg-gradient-to-b from-amber-500 to-amber-700 hover:from-amber-400 hover:to-amber-600 text-black font-bold py-2.5 rounded-sm border-b-4 border-amber-900 active:border-b-0 active:mt-1 transition-all shadow-md">ENTRY</button>
+                    <div class="border-2 border-amber-800 bg-gray-900 p-2 flex-1 flex flex-col justify-between">
+                        <div>
+                            <div class="text-amber-300 text-xs mb-1 border-b border-amber-800 pb-1">■ INPUT COIN</div>
+                            ${amountInputHtml}
+                        </div>
+                        <div class="text-center pt-1.5 border-t border-amber-800/40">
+                            <div class="text-[10px] text-amber-500/70 mb-1 h-4">${state.selectedBetType === 'JACKPOT' ? '※おまかせ選択' : `選択中: ${state.selectedHorses.join(' - ') || 'なし'}`}</div>
+                            <button onclick="addBet()" class="w-full bg-gradient-to-b from-amber-500 to-amber-700 hover:from-amber-400 hover:to-amber-600 text-black font-bold py-2 rounded-sm border-b-4 border-amber-900 active:border-b-0 active:mt-1 transition-all shadow-md text-sm">ENTRY</button>
                         </div>
                     </div>
                     ${ownerMenu}
@@ -2393,40 +2712,67 @@
             `;
         }
 
+        // ★ のっぺり感を解消する3層構造パララックス3Dカメラの描画
         function getRaceHTML() {
             const horsesDOM = state.horses.map((h, i) => `
-                <div id="horse-dom-${h.no}" class="absolute flex items-end transition-transform duration-75 ease-linear" style="top: calc(${i * 12 + 2}%); left: 0%; transform: translateX(-50%);">
+                <div id="horse-dom-${h.no}" class="absolute flex items-end transition-transform duration-75 ease-linear" style="top: calc(${i * 12 + 1}%); left: 0%; transform: translateX(-50%);">
                     <div class="w-6 h-6 rounded border ${h.waku.bg} ${h.waku.text} ${h.waku.border} text-xs flex items-center justify-center mb-1 mr-1 font-bold z-20 shadow-md">${h.no}</div>
                     <div id="horse-emoji-${h.no}" class="text-5xl filter drop-shadow-xl z-10 relative transform -scale-x-100"><span class="absolute top-0 right-0 text-xs transform scale-x-100"></span>🏇</div>
                     <div id="horse-dust-${h.no}" class="absolute -left-4 bottom-0 text-2xl opacity-60" style="display:none;">💨</div>
                 </div>
             `).join('');
 
-            const courseColor = state.currentCourse ? state.currentCourse.color : 'bg-[#1a472a]';
             const isDirt = state.currentCourse && state.currentCourse.type === 'ダート';
             
+            // パララックス（視差効果）背景のスタイル定義
+            const skyBg = 'linear-gradient(to bottom, #1e3a8a, #3b82f6)';
+            
+            let standBg = 'repeating-linear-gradient(90deg, #1e293b 0px, #1e293b 80px, #0f172a 80px, #0f172a 160px)';
+            if (isDirt) {
+                standBg = 'repeating-linear-gradient(90deg, #332211 0px, #332211 100px, #221100 100px, #221100 200px)';
+            }
+
+            const courseColor = state.currentCourse ? state.currentCourse.color : 'bg-[#1a472a]';
             let trackBgStyle = 'repeating-linear-gradient(90deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 50px, transparent 50px, transparent 100px)';
             if (isDirt) {
                 trackBgStyle = 'repeating-linear-gradient(90deg, rgba(0,0,0,0.05) 0px, rgba(0,0,0,0.05) 10px, transparent 10px, transparent 20px)';
             }
 
             return `
-            <div id="race-container" class="border-2 border-amber-800 ${courseColor} relative overflow-hidden shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]" style="height: 450px;">
-                <div id="race-track" class="absolute top-0 left-0 h-full will-change-transform" style="width: 400%;">
-                    <div class="absolute top-0 left-0 w-full h-full pointer-events-none" style="background-image: ${trackBgStyle}"></div>
+            <div id="race-container" class="border-2 border-amber-800 ${courseColor} relative overflow-hidden shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] transition-all duration-300" style="height: 450px;">
+                
+                <!-- 【超臨場感・パララックス視差効果レイヤー】 -->
+                <div id="race-track" class="absolute top-0 left-0 h-full will-change-transform flex flex-col justify-end" style="width: 400%;">
                     
-                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 23.75%"></div>
-                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 47.5%"></div>
-                    <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 71.25%"></div>
+                    <!-- 1層：背景の空 (ゆっくり流れる) -->
+                    <div class="absolute top-0 left-0 w-full h-[20%] opacity-40" style="background: ${skyBg}; background-size: 500px 100%;"></div>
                     
-                    <div class="absolute top-0 h-full border-l-4 border-red-600 shadow-[0_0_10px_rgba(220,38,38,0.8)]" style="left: 95%"></div>
-                    <div class="absolute top-2 text-white/50 font-bold text-2xl" style="left: calc(95% + 10px)">GOAL</div>
-                    
-                    ${horsesDOM}
+                    <!-- 2層：観客スタンド (中速で流れる) -->
+                    <div class="absolute top-[18%] left-0 w-full h-[22%] border-b-2 border-amber-900/30" style="background: ${standBg}; background-size: 400px 100%;">
+                        <!-- 観客席の簡易3D表現のための窓ドット -->
+                        <div class="absolute bottom-0 w-full h-2 bg-yellow-500/20" style="background-image: repeating-linear-gradient(90deg, transparent, transparent 10px, #eab308 10px, #eab308 15px);"></div>
+                    </div>
+
+                    <!-- 3層：芝・砂トラック本体 (高速で流れる) -->
+                    <div class="absolute bottom-0 left-0 w-full h-[60%] ${courseColor} border-t-4 border-amber-600/30 shadow-[inset_0_15px_30px_rgba(0,0,0,0.6)]">
+                        <div class="absolute top-0 left-0 w-full h-full pointer-events-none" style="background-image: ${trackBgStyle}"></div>
+                        
+                        <!-- ゲート、残りハロン棒などのオブジェクト -->
+                        <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 23.75%"></div>
+                        <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 47.5%"></div>
+                        <div class="absolute top-0 h-full border-l-2 border-white/20" style="left: 71.25%"></div>
+                        
+                        <!-- ゴールライン -->
+                        <div class="absolute top-0 h-full border-l-4 border-red-600 shadow-[0_0_10px_rgba(220,38,38,0.8)]" style="left: 95%"></div>
+                        <div class="absolute top-2 text-white/50 font-bold text-2xl" style="left: calc(95% + 10px)">GOAL</div>
+                        
+                        ${horsesDOM}
+                    </div>
+
                 </div>
                 
                 <div class="absolute bottom-3 right-3 z-30 flex gap-2">
-                    <div id="race-minimap" class="bg-black/50 text-white text-xs px-2 py-1 rounded-sm border border-gray-600 hidden md:flex items-center">
+                    <div id="race-minimap" class="bg-black/50 text-white text-xs px-2 py-1 rounded-sm border border-gray-600 flex items-center shadow-md">
                         残り: <span id="distance-left" class="font-bold text-yellow-400 ml-1 w-12 text-right">---</span> m
                     </div>
                 </div>
